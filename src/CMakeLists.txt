@@ -4,21 +4,16 @@ add_library(ulacr STATIC
     core/codec_config.cpp
     # io
     io/wav_reader.cpp
-    io/wav_writer.cpp
     io/bitstream.cpp
     io/ulacr_file.cpp
     # analysis
     analysis/segmenter.cpp
-    analysis/feature_extractor.cpp
     analysis/harmonic_model.cpp
     # graph
     graph/block_graph.cpp
     graph/lsh.cpp
-    # dictionary
-    dictionary/spectral_dict.cpp
     # transform
     transform/wavelet.cpp
-    transform/fft.cpp
     # coding
     coding/rans_coder.cpp
     coding/context_model.cpp
@@ -28,6 +23,15 @@ add_library(ulacr STATIC
     encoder.cpp
     decoder.cpp
 )
+
+# Optional: research modules (disabled by default for faster builds)
+if(NOT ULACR_DISABLE_RESEARCH_MODULES)
+    target_sources(ulacr PRIVATE
+        analysis/feature_extractor.cpp
+        dictionary/spectral_dict.cpp
+        transform/fft.cpp
+    )
+endif()
 
 target_include_directories(ulacr
     PUBLIC  ${CMAKE_SOURCE_DIR}/include
