@@ -10,14 +10,19 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # ---------------------------------------------------------------
 option(ULACR_BUILD_TOOLS  "Build encoder/decoder CLI tools" ON)
 option(ULACR_BUILD_TESTS  "Build unit tests"                ON)
+option(ULACR_DISABLE_RESEARCH_MODULES "Disable research modules for faster builds" ON)
 
 # ---------------------------------------------------------------
 # Compiler flags
 # ---------------------------------------------------------------
 if(MSVC)
     add_compile_options(/W4 /utf-8)
+    # Release-mode optimization
+    string(APPEND CMAKE_CXX_FLAGS_RELEASE " /O2 /GL")
 else()
-    add_compile_options(-Wall -Wextra -Wpedantic -O2)
+    add_compile_options(-Wall -Wextra -Wpedantic)
+    # Release-mode optimization
+    string(APPEND CMAKE_CXX_FLAGS_RELEASE " -O3 -march=native")
 endif()
 
 # ---------------------------------------------------------------
