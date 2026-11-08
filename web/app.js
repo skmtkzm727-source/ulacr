@@ -120,6 +120,9 @@ async function getCodec() {
       locateFile: function(path) {
         return new URL(path, import.meta.url).href;
       }
+    }).catch(function(error) {
+      codecPromise = null;
+      throw error;
     });
   }
   return codecPromise;
