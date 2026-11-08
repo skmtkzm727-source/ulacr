@@ -122,3 +122,36 @@ ulac-r/
   メタデータを消費するため、小さい `min_block_size` では相対的にオーバーヘッドが
   大きくなる点に注意（`max_harmonics` を小さくするか、ブロックサイズを大きくして使用）
 - マルチスレッド化（チャンネル/セグメント単位の並列化）は未実装
+
+
+## Web Demo（ブラウザ版）
+
+`web/` に、ULAC-Rをブラウザ上で試せる変換・再生ツールがあります。
+
+- PCM WAV → `.ulacr` 圧縮
+- `.ulacr` → WAV 復元
+- 復元したWAVのブラウザ内試聴
+- 変換前後のサイズと元サイズ比の表示
+- 音声ファイルはブラウザ内で処理し、サーバーへ送信しません
+
+### GitHub Pagesで公開
+
+1. GitHubリポジトリの **Settings → Pages** を開きます。
+2. **Build and deployment → Source** を **GitHub Actions** にします。
+3. `main` ブランチへ変更をpushすると、`.github/workflows/deploy-pages.yml` がEmscriptenでWebAssemblyをビルドし、GitHub Pagesへ公開します。
+4. Actionsタブで **Build and deploy ULAC-R Web** の完了を確認します。
+
+### ローカルでWebAssemblyをビルド
+
+Emscripten SDKを用意したうえで、リポジトリのルートから実行します。
+
+```bash
+emcmake cmake -S . -B build-wasm \
+  -DULACR_BUILD_TOOLS=OFF \
+  -DULACR_BUILD_TESTS=OFF \
+  -DULACR_BUILD_WASM=ON \
+  -DCMAKE_BUILD_TYPE=Release
+cmake --build build-wasm --parallel
+```
+
+生成物は `build-wasm/web-dist/` に出力されます。Web UI（`web/index.html`、`web/app.js`、`web/styles.css`）と同じディレクトリに配置して、HTTPサーバー経由で開いてください。
