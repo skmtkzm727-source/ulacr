@@ -11,18 +11,21 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 option(ULACR_BUILD_TOOLS  "Build encoder/decoder CLI tools" ON)
 option(ULACR_BUILD_TESTS  "Build unit tests"                ON)
 option(ULACR_DISABLE_RESEARCH_MODULES "Disable research modules for faster builds" ON)
+option(ULACR_BUILD_WASM "Build the browser WebAssembly module" OFF)
 
 # ---------------------------------------------------------------
 # Compiler flags
 # ---------------------------------------------------------------
 if(MSVC)
     add_compile_options(/W4 /utf-8)
-    # Release-mode optimization
     string(APPEND CMAKE_CXX_FLAGS_RELEASE " /O2 /GL")
 else()
     add_compile_options(-Wall -Wextra -Wpedantic)
-    # Release-mode optimization
-    string(APPEND CMAKE_CXX_FLAGS_RELEASE " -O3 -march=native")
+    if(EMSCRIPTEN)
+        string(APPEND CMAKE_CXX_FLAGS_RELEASE " -O3")
+    else()
+        string(APPEND CMAKE_CXX_FLAGS_RELEASE " -O3 -march=native")
+    endif()
 endif()
 
 # ---------------------------------------------------------------
@@ -43,4 +46,14 @@ endif()
 if(ULACR_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)
+endif()
+
+# ---------------------------------------------------------------
+# Browser WebAssembly build
+# ---------------------------------------------------------------
+if(ULACR_BUILD_WASM)
+    if(NOT EMSCRIPTEN)
+        message(FATAL_ERROR "ULACR_BUILD_WASM requires the Emscripten toolchain. Configure with emcmake.")
+    endif()
+    add_subdirectory(web/wasm)
 endif()
