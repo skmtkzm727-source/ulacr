@@ -1,7 +1,12 @@
 add_executable(ulacr-wasm bridge.cpp)
 target_link_libraries(ulacr-wasm PRIVATE ulacr)
 
+# The codec catches C++ exceptions for malformed input and I/O failures.
+target_compile_options(ulacr PRIVATE -fexceptions)
+target_compile_options(ulacr-wasm PRIVATE -fexceptions)
+
 target_link_options(ulacr-wasm PRIVATE
+    "-fexceptions"
     "-sMODULARIZE=1"
     "-sEXPORT_ES6=1"
     "-sEXPORT_NAME=ULACRModule"
