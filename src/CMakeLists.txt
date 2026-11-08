@@ -9,6 +9,7 @@ add_library(ulacr STATIC
     io/ulacr_file.cpp
     # analysis
     analysis/segmenter.cpp
+    analysis/feature_extractor.cpp
     analysis/harmonic_model.cpp
     # graph
     graph/block_graph.cpp
@@ -28,7 +29,6 @@ add_library(ulacr STATIC
 # Optional: research modules (disabled by default for faster builds)
 if(NOT ULACR_DISABLE_RESEARCH_MODULES)
     target_sources(ulacr PRIVATE
-        analysis/feature_extractor.cpp
         dictionary/spectral_dict.cpp
         transform/fft.cpp
     )
