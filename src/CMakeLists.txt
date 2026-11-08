@@ -4,6 +4,7 @@ add_library(ulacr STATIC
     core/codec_config.cpp
     # io
     io/wav_reader.cpp
+    io/wav_writer.cpp
     io/bitstream.cpp
     io/ulacr_file.cpp
     # analysis
