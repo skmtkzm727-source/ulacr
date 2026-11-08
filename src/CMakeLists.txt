@@ -16,6 +16,7 @@ add_library(ulacr STATIC
     graph/lsh.cpp
     # transform
     transform/wavelet.cpp
+    transform/fft.cpp
     # coding
     coding/rans_coder.cpp
     coding/context_model.cpp
@@ -30,7 +31,6 @@ add_library(ulacr STATIC
 if(NOT ULACR_DISABLE_RESEARCH_MODULES)
     target_sources(ulacr PRIVATE
         dictionary/spectral_dict.cpp
-        transform/fft.cpp
     )
 endif()
 
