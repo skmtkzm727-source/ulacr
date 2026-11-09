@@ -3,6 +3,7 @@
 #include "ulacr/io/wav_reader.hpp"
 #include "ulacr/io/ulacr_file.hpp"
 #include "ulacr/io/bitstream.hpp"
+#include "ulacr/io/checksum.hpp"
 #include "ulacr/analysis/segmenter.hpp"
 #include "ulacr/analysis/harmonic_model.hpp"
 #include "ulacr/graph/block_graph.hpp"
@@ -656,7 +657,6 @@ Error Encoder::encode(const AudioBuffer& buf, const std::filesystem::path& outpu
     // --- 6. コンテキストグループ（確率テーブル + rANS符号化データ）---
     w.write_uvarint(groups.size());
     coding::RansEncoder rans_enc;
-    coding::AdaptiveRangeEncoder range_enc;
     coding::AdaptiveMixtureRangeEncoder mixture_range_enc;
     for (const auto& kv : groups) {
         const coding::ContextKey&    key     = kv.first;
@@ -700,6 +700,7 @@ Error Encoder::encode(const AudioBuffer& buf, const std::filesystem::path& outpu
     // --- 8. ファイル出力 ---
     report(impl_->progress, 0.95f, "writing-file");
     auto final_bytes = w.finish();
+    if (cfg.profile == EncoderProfile::Ultra) io::append_crc32(final_bytes);
 
     std::ofstream f(output_path, std::ios::binary);
     if (!f) return Error::IOError;
