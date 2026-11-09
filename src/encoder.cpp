@@ -16,6 +16,8 @@
 #include <unordered_map>
 #include <algorithm>
 #include <cmath>
+#include <chrono>
+#include <system_error>
 
 namespace ulacr {
 
@@ -98,13 +100,15 @@ detail::PredictorResult choose_predictor_by_payload_cost(
         std::span<const Sample> input,
         const WaveletTransform& wavelet,
         const CodecConfig& cfg,
-        bool enabled) {
+        bool enabled,
+        uint8_t max_order) {
     detail::PredictorResult best;
     best.residual.assign(input.begin(), input.end());
     best.estimated_bits = estimate_wavelet_payload_bits(best.residual, wavelet, cfg) + 8u;
     if (!enabled || input.size() < 2) return best;
 
-    for (uint8_t order = 1; order <= 4 && order < input.size(); ++order) {
+    max_order = std::min<uint8_t>(max_order, 16);
+    for (uint8_t order = 1; order <= max_order && order < input.size(); ++order) {
         SampleVec residual(input.size(), 0);
         std::vector<Sample> seeds(input.begin(), input.begin() + order);
         for (size_t i = order; i < input.size(); ++i) {
@@ -136,8 +140,11 @@ uint64_t estimate_audio_cost(const AudioBuffer& audio,
         for (const Segment& segment : segments) {
             const std::span<const Sample> samples(
                 channel.data() + segment.offset, segment.length);
+            const uint8_t max_order = cfg.profile == EncoderProfile::Ultra
+                ? std::max<uint8_t>(cfg.max_predictor_order, 16)
+                : std::min<uint8_t>(cfg.max_predictor_order, 4);
             const auto predictor = choose_predictor_by_payload_cost(
-                samples, wavelet, cfg, cfg.enable_predictive_coding && integer_pcm);
+                samples, wavelet, cfg, cfg.enable_predictive_coding && integer_pcm, max_order);
             total_bits += predictor.estimated_bits;
         }
     }
@@ -163,12 +170,60 @@ Error Encoder::encode_file(const std::filesystem::path& input_path,
 Error Encoder::encode(const AudioBuffer& buf, const std::filesystem::path& output_path) {
     if (!buf.valid() || buf.spec.num_samples == 0) return Error::InvalidArg;
 
-    const CodecConfig& cfg = impl_->cfg;
-    if (cfg.profile != EncoderProfile::Classic) return Error::UnsupportedFormat;
-    const uint32_t num_channels = buf.spec.num_channels;
+    // Auto compares complete serialized outputs; selection is based on actual
+    // file length, not an entropy estimate.
+    if (impl_->cfg.profile == EncoderProfile::Auto) {
+        CodecConfig classic_cfg = impl_->cfg;
+        classic_cfg.profile = EncoderProfile::Classic;
+        classic_cfg.max_predictor_order = 4;
+        CodecConfig ultra_cfg = impl_->cfg;
+        ultra_cfg.profile = EncoderProfile::Ultra;
+        ultra_cfg.max_predictor_order = 16;
+        const auto nonce = std::chrono::steady_clock::now().time_since_epoch().count();
+        const auto stem = output_path.string() + ".auto-" + std::to_string(nonce);
+        const std::filesystem::path classic_tmp(stem + "-classic");
+        const std::filesystem::path ultra_tmp(stem + "-ultra");
+        Encoder classic_encoder(classic_cfg);
+        Encoder ultra_encoder(ultra_cfg);
+        const Error classic_err = classic_encoder.encode(buf, classic_tmp);
+        const Error ultra_err = ultra_encoder.encode(buf, ultra_tmp);
+        if (classic_err != Error::OK || ultra_err != Error::OK) {
+            std::error_code ignored;
+            std::filesystem::remove(classic_tmp, ignored);
+            std::filesystem::remove(ultra_tmp, ignored);
+            return classic_err != Error::OK ? classic_err : ultra_err;
+        }
+        std::error_code fs_error;
+        const auto classic_size = std::filesystem::file_size(classic_tmp, fs_error);
+        if (fs_error) return Error::IOError;
+        const auto ultra_size = std::filesystem::file_size(ultra_tmp, fs_error);
+        if (fs_error) return Error::IOError;
+        const auto& winner = ultra_size < classic_size ? ultra_tmp : classic_tmp;
+        std::filesystem::copy_file(winner, output_path,
+            std::filesystem::copy_options::overwrite_existing, fs_error);
+        std::error_code ignored;
+        std::filesystem::remove(classic_tmp, ignored);
+        std::filesystem::remove(ultra_tmp, ignored);
+        return fs_error ? Error::IOError : Error::OK;
+    }
+
+    CodecConfig effective_cfg = impl_->cfg;
     const bool integer_pcm = buf.spec.format == SampleFormat::Int16 ||
                              buf.spec.format == SampleFormat::Int24 ||
                              buf.spec.format == SampleFormat::Int32;
+    // In v0.3 float samples are opaque bit patterns, not numeric integers.
+    // Disable arithmetic transforms so every IEEE-754 bit is preserved.
+    if (effective_cfg.profile == EncoderProfile::Ultra && !integer_pcm) {
+        effective_cfg.enable_block_graph = false;
+        effective_cfg.enable_harmonic = false;
+        effective_cfg.enable_predictive_coding = false;
+        effective_cfg.enable_stereo_mid_side = false;
+        effective_cfg.enable_wavelet = false;
+    }
+    const CodecConfig& cfg = effective_cfg;
+    if (cfg.profile != EncoderProfile::Classic && cfg.profile != EncoderProfile::Ultra)
+        return Error::UnsupportedFormat;
+    const uint32_t num_channels = buf.spec.num_channels;
     AudioBuffer coding_buf = buf;
     bool use_mid_side = false;
 
@@ -279,8 +334,11 @@ Error Encoder::encode(const AudioBuffer& buf, const std::filesystem::path& outpu
             // --- 適応整数予測 ---
             // 既存のモデル差分/グラフ差分に重ねて、次数0〜4の固定予測器を
             // 実測コストで比較する。予測が不利なら次数0（恒等変換）を選ぶ。
+            const uint8_t max_order = cfg.profile == EncoderProfile::Ultra
+                ? std::max<uint8_t>(cfg.max_predictor_order, 16)
+                : std::min<uint8_t>(cfg.max_predictor_order, 4);
             auto prediction = choose_predictor_by_payload_cost(
-                wavelet_input, wavelet, cfg, cfg.enable_predictive_coding && integer_pcm);
+                wavelet_input, wavelet, cfg, cfg.enable_predictive_coding && integer_pcm, max_order);
             meta[c][s].prediction_order = prediction.order;
             meta[c][s].prediction_seeds = std::move(prediction.seeds);
             wavelet_input = std::move(prediction.residual);
@@ -359,7 +417,7 @@ Error Encoder::encode(const AudioBuffer& buf, const std::filesystem::path& outpu
     // --- 5. ファイルヘッダの書き込み ---
     report(impl_->progress, 0.75f, "entropy-coding");
     io::BitWriter w;
-    io::write_file_magic(w);
+    io::write_file_magic(w, cfg.profile == EncoderProfile::Ultra ? 3 : 2);
     io::write_audio_spec(w, buf.spec);
 
     io::DecodeFlags flags;
