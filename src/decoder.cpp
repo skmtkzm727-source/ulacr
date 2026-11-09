@@ -177,7 +177,6 @@ Error Decoder::decode(const std::filesystem::path& input_path, AudioBuffer& out)
                     }
                 }
             }
-            }
         }
 
         // --- コンテキストグループ（確率テーブル + rANS復号）---
