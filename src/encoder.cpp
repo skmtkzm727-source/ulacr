@@ -156,6 +156,28 @@ detail::PredictorResult choose_predictor_by_payload_cost(
             best = std::move(adaptive);
         }
     }
+    // C-lite: exact integer-delay matching. This is useful for periodic or
+    // repeated material; unlike interpolation, it has no fractional rounding.
+    if (cfg.profile == EncoderProfile::Ultra && enabled && input.size() >= 256) {
+        const uint32_t delays[] = {1, 2, 3, 4, 5, 6, 7, 8, 12, 16, 24, 32, 48, 64};
+        for (uint32_t lag : delays) {
+            if (lag >= input.size() / 2) continue;
+            detail::PredictorResult matched;
+            matched.order = 18;
+            matched.seeds.reserve(lag + 1);
+            matched.seeds.push_back(static_cast<Sample>(lag));
+            matched.seeds.insert(matched.seeds.end(), input.begin(), input.begin() + lag);
+            matched.residual.assign(input.size(), 0);
+            for (size_t i = lag; i < input.size(); ++i)
+                matched.residual[i] = input[i] - input[i - lag];
+            uint64_t cost = estimate_wavelet_payload_bits(matched.residual, wavelet, cfg) + 8u;
+            for (Sample seed : matched.seeds)
+                cost += 8u * detail::uvarint_size(detail::zigzag_u64(seed));
+            matched.estimated_bits = cost;
+            if (cost < best.estimated_bits) best = std::move(matched);
+        }
+    }
+
     // B3-lite: run the same deterministic integer predictors backward
     // through the block. The reverse flag is stored in the high bit of the
     // 0.3 predictor-order byte; seeds are the original tail samples.
