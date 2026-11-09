@@ -17,6 +17,7 @@ struct CodecConfig {
     uint32_t dict_atom_size = 256;
     uint32_t ksvd_iterations = 20;
     bool enable_predictive_coding = true;
+    uint8_t max_predictor_order = 4; // classic 0..4; 0.3 supports up to 16
     bool enable_stereo_mid_side = true;
     bool enable_wavelet = true;
     uint32_t wavelet_levels = 6;
