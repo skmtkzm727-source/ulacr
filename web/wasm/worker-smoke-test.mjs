@@ -62,6 +62,33 @@ function makeWav() {
   return wav;
 }
 
+function makeSustainedToneWav() {
+  const sampleRate = 8000;
+  const frames = sampleRate * 20;
+  const pcm = Buffer.alloc(frames * 2);
+  for (let i = 0; i < frames; i++) {
+    const sample = Math.round(10000 * Math.sin(2 * Math.PI * 440 * i / sampleRate));
+    pcm.writeInt16LE(sample, i * 2);
+  }
+
+  const wav = Buffer.alloc(44 + pcm.length);
+  wav.write("RIFF", 0);
+  wav.writeUInt32LE(36 + pcm.length, 4);
+  wav.write("WAVE", 8);
+  wav.write("fmt ", 12);
+  wav.writeUInt32LE(16, 16);
+  wav.writeUInt16LE(1, 20);
+  wav.writeUInt16LE(1, 22);
+  wav.writeUInt32LE(sampleRate, 24);
+  wav.writeUInt32LE(sampleRate * 2, 28);
+  wav.writeUInt16LE(2, 32);
+  wav.writeUInt16LE(16, 34);
+  wav.write("data", 36);
+  wav.writeUInt32LE(pcm.length, 40);
+  pcm.copy(wav, 44);
+  return wav;
+}
+
 function makeStressWav() {
   const sampleRate = 8000;
   const frames = sampleRate * 20;
@@ -126,6 +153,23 @@ assert.ok(decoded.statuses.some(status => status.includes("復元しています
 assert.ok(decoded.progress.length > 0, "Decoder should emit progress events");
 assert.ok(decoded.progress.every(item => item.id === 3 && Number.isFinite(item.progress)));
 
+const segmentationInput = makeSustainedToneWav();
+const segmentationStart = Date.now();
+const segmentationEncoded = await invoke(8, "encode", new Uint8Array(segmentationInput));
+const segmentationElapsed = Date.now() - segmentationStart;
+assert.ok(!segmentationEncoded.error, segmentationEncoded.error?.message);
+assert.ok(segmentationEncoded.output?.length > 0);
+const segmentationProgress = segmentationEncoded.progress.filter(
+  item => item.phase === "segmentation"
+);
+assert.ok(segmentationProgress.length >= 10,
+  "Long sustained audio must emit incremental segmentation progress");
+assert.ok(segmentationProgress.some(item => item.progress >= 0.049),
+  "Segmentation progress must reach its 5% stage boundary");
+assert.ok(segmentationElapsed < 20000,
+  "20-second sustained tone must not stall adaptive segmentation (" +
+  segmentationElapsed + " ms)");
+
 const stressInput = makeStressWav();
 const stressStart = Date.now();
 const stressEncoded = await invoke(4, "encode", new Uint8Array(stressInput));
@@ -179,5 +223,6 @@ console.log(
   "Block-graph stress test passed:",
   stressInput.length, "bytes in", stressElapsed, "ms;",
   graphProgress.length, "block-graph updates;",
-  entropyProgress.length, "entropy-coding updates"
+  entropyProgress.length, "entropy-coding updates;",
+  segmentationProgress.length, "segmentation updates in", segmentationElapsed, "ms"
 );
