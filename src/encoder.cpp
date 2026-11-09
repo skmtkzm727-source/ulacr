@@ -18,6 +18,7 @@
 #include <algorithm>
 #include <cmath>
 #include <chrono>
+#include <bit>
 #include <system_error>
 
 namespace ulacr {
@@ -286,6 +287,7 @@ Error Encoder::encode(const AudioBuffer& buf, const std::filesystem::path& outpu
     struct SegMeta {
         uint32_t levels_done = 0;
         uint8_t prediction_order = 0;
+        uint8_t scale_shift = 0;
         std::vector<Sample> prediction_seeds;
         std::vector<SubbandMeta> subbands;
     };
@@ -351,6 +353,32 @@ Error Encoder::encode(const AudioBuffer& buf, const std::filesystem::path& outpu
             } else {
                 coeffs.levels = 0;
                 coeffs.subbands.push_back(std::move(wavelet_input));
+            }
+
+            // A1: remove a common power-of-two factor from all transformed
+            // coefficients in this segment. The inverse multiplies the exact
+            // integer coefficients back before the inverse wavelet/predictor.
+            if (cfg.profile == EncoderProfile::Ultra && integer_pcm) {
+                uint32_t common_shift = 31;
+                bool has_nonzero = false;
+                for (const auto& band : coeffs.subbands) {
+                    for (Sample value : band) {
+                        if (value == 0) continue;
+                        has_nonzero = true;
+                        common_shift = std::min<uint32_t>(
+                            common_shift,
+                            std::countr_zero(static_cast<uint64_t>(value)));
+                    }
+                }
+                if (has_nonzero) {
+                    common_shift = std::min<uint32_t>(common_shift, 31);
+                    const Sample divisor = static_cast<Sample>(1ull << common_shift);
+                    if (common_shift > 0) {
+                        for (auto& band : coeffs.subbands)
+                            for (Sample& value : band) value /= divisor;
+                        meta[c][s].scale_shift = static_cast<uint8_t>(common_shift);
+                    }
+                }
             }
 
             meta[c][s].levels_done = coeffs.levels;
@@ -472,6 +500,7 @@ Error Encoder::encode(const AudioBuffer& buf, const std::filesystem::path& outpu
             for (Sample seed : sm.prediction_seeds) {
                 w.write_uvarint(detail::zigzag_u64(seed));
             }
+            if (cfg.profile == EncoderProfile::Ultra) w.write_byte(sm.scale_shift);
         }
     }
 
