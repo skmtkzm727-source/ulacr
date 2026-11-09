@@ -204,6 +204,9 @@ int main() {
             for (size_t i = 0; i < 8; ++i)
                 f32.channels[0][i] = static_cast<Sample>(std::bit_cast<int32_t>(f32_bits[i]));
             run_roundtrip(ultra, f32, "ultra_float32_bitpatterns");
+            CodecConfig auto_float = ultra;
+            auto_float.profile = EncoderProfile::Auto;
+            run_roundtrip(auto_float, f32, "auto_float32_bitpatterns");
 
             AudioBuffer f64;
             f64.spec.sample_rate = 48000;
@@ -217,6 +220,7 @@ int main() {
             for (size_t i = 0; i < 8; ++i)
                 f64.channels[0][i] = std::bit_cast<Sample>(f64_bits[i]);
             run_roundtrip(ultra, f64, "ultra_float64_bitpatterns");
+            run_roundtrip(auto_float, f64, "auto_float64_bitpatterns");
         }
 
         // ULAC-R 0.3 CRC32 detects any byte mutation before decoding.
