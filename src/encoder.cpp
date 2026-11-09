@@ -323,8 +323,21 @@ Error Encoder::encode(const AudioBuffer& buf, const std::filesystem::path& outpu
 
     // --- 1. 適応的セグメンテーション ---
     report(impl_->progress, 0.0f, "segmentation");
-    Segmenter segmenter(cfg);
-    std::vector<Segment> segments = segmenter.segment(buf);
+    std::vector<Segment> segments;
+    if (cfg.profile == EncoderProfile::Ultra && !integer_pcm) {
+        // Float samples are opaque IEEE bit patterns. Do not run numeric
+        // energy/range analysis over their signed integer representations.
+        const uint32_t block_size = std::max<uint32_t>(1u, cfg.max_block_size);
+        for (uint64_t offset = 0; offset < buf.spec.num_samples;) {
+            const uint32_t length = static_cast<uint32_t>(
+                std::min<uint64_t>(block_size, buf.spec.num_samples - offset));
+            segments.push_back(Segment{offset, length, 0.0f});
+            offset += length;
+        }
+    } else {
+        Segmenter segmenter(cfg);
+        segments = segmenter.segment(buf);
+    }
     if (segments.empty()) return Error::InvalidArg;
 
     // M/S変換は常時適用しない。変換前後の実際のウェーブレット＋
