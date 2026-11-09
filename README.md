@@ -46,7 +46,7 @@ g++ -std=c++20 -O2 -Iinclude -o build/ulacr-decode tools/ulacr_decode.cpp build/
 |---|---|---|
 | WAV/RF64/RAW I/O | `io/wav_reader.*`, `io/wav_writer.*` | PCM(16/24/32bit)・浮動小数点(32/64bit)対応。浮動小数点はビットパターンを整数として可逆保存 |
 | 適応的セグメンテーション | `analysis/segmenter.*` | エネルギー変化・スペクトルフラックス・ゼロ交差率・局所エントロピーに基づく可変長分割 |
-| Block Graph Compression | `graph/block_graph.*`, `graph/lsh.*` | SimHash(LSH)による類似ブロック探索。同長・類似度閾値超のブロックは参照ブロックとの差分のみ保存 |
+| Block Graph Compression | `graph/block_graph.*`, `graph/lsh.*` | SimHash(LSH)で候補を探し、整数差分の推定符号量が実際に減る参照だけを採用 |
 | Adaptive Integer Prediction | `pipeline_common.hpp` | ブロックごとに次数0〜4の整数固定予測器を比較。予測次数・初期値の符号量も含めて自動選択 |
 | Stereo Mid/Side | `encoder.cpp`, `decoder.cpp` | 整数PCMステレオを可逆Mid/Side変換し、左右の相関を圧縮に利用 |
 | Harmonic Modeling | `analysis/harmonic_model.*` | 自己相関による基本周波数推定 + Goertzelアルゴリズムによる倍音振幅・位相推定。差分のみ保存し完全可逆 |
@@ -125,7 +125,7 @@ ulac-r/
 - Harmonic Modeling は1ブロックあたり最大 `(1 + 2*max_harmonics) * 4` バイトの
   メタデータを消費するため、小さい `min_block_size` では相対的にオーバーヘッドが
   大きくなる点に注意（`max_harmonics` を小さくするか、ブロックサイズを大きくして使用）
-- スペクトル辞書のメインストリーム統合は未実装（現状は研究用モジュール）。
+- スペクトル辞書のメインストリーム統合は未実装（現状は研究用モジュール）。最高圧縮プリセットでは誤解を避けるため無効化しています。
 - マルチスレッド化（チャンネル/セグメント単位の並列化）は未実装
 
 
