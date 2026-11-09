@@ -215,6 +215,7 @@ Error Decoder::decode(const std::filesystem::path& input_path, AudioBuffer& out)
         size_t num_groups = static_cast<size_t>(r.read_uvarint());
         coding::RansDecoder rans_dec;
         coding::AdaptiveRangeDecoder range_dec;
+        coding::AdaptiveMixtureRangeDecoder mixture_range_dec;
         for (size_t g = 0; g < num_groups; ++g) {
             uint8_t stream_type = r.read_byte();
             uint8_t plane_idx   = r.read_byte();
@@ -226,7 +227,10 @@ Error Decoder::decode(const std::filesystem::path& input_path, AudioBuffer& out)
 
             GroupData gd;
             if (symbol_count > 0) {
-                uint32_t used_alphabet = static_cast<uint32_t>(r.read_uvarint());
+                const uint32_t alphabet_field = static_cast<uint32_t>(r.read_uvarint());
+                const bool use_mixture = file_minor >= 3 && (alphabet_field & 0x80000000u) != 0;
+                const uint32_t used_alphabet = file_minor >= 3
+                    ? (alphabet_field & 0x7fffffffu) : alphabet_field;
                 if (used_alphabet == 0 || used_alphabet > 65536) {
                     throw io::BitstreamError("invalid symbol alphabet");
                 }
@@ -234,7 +238,9 @@ Error Decoder::decode(const std::filesystem::path& input_path, AudioBuffer& out)
                     uint64_t encoded_len = r.read_uvarint();
                     auto encoded_bytes = r.read_bytes(static_cast<size_t>(encoded_len));
                     try {
-                        gd.symbols = range_dec.decode(encoded_bytes, used_alphabet, symbol_count);
+                        gd.symbols = use_mixture
+                            ? mixture_range_dec.decode(encoded_bytes, used_alphabet, symbol_count)
+                            : range_dec.decode(encoded_bytes, used_alphabet, symbol_count);
                     } catch (const std::exception&) {
                         throw io::BitstreamError("invalid adaptive range stream");
                     }
