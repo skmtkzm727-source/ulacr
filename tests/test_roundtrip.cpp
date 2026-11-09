@@ -88,6 +88,20 @@ int main() {
         auto buf_stereo = make_test_buffer(2, 8000, 44100, SampleFormat::Int16);
         auto buf_24bit  = make_test_buffer(2, 4000, 48000, SampleFormat::Int24);
 
+        // Mid/Side + adaptive predictor: strongly correlated stereo and smooth integer ramp.
+        AudioBuffer buf_correlated;
+        buf_correlated.spec.sample_rate = 48000;
+        buf_correlated.spec.num_channels = 2;
+        buf_correlated.spec.num_samples = 24000;
+        buf_correlated.spec.format = SampleFormat::Int16;
+        buf_correlated.spec.source_format = SourceFormat::WAV;
+        buf_correlated.channels.assign(2, SampleVec(buf_correlated.spec.num_samples));
+        for (uint64_t i = 0; i < buf_correlated.spec.num_samples; ++i) {
+            Sample base = static_cast<Sample>((i * 7u) % 20000u) - 10000;
+            buf_correlated.channels[0][i] = base;
+            buf_correlated.channels[1][i] = base - static_cast<Sample>(i % 7u);
+        }
+
         // --- 基本構成 (Wavelet + Residual Island + Bucket) ---
         {
             CodecConfig cfg = CodecConfig::fast();
@@ -97,6 +111,7 @@ int main() {
             run_roundtrip(cfg, buf_mono,   "mono_basic");
             run_roundtrip(cfg, buf_stereo, "stereo_basic");
             run_roundtrip(cfg, buf_24bit,  "24bit_basic");
+            run_roundtrip(cfg, buf_correlated, "stereo_correlated_predictive");
         }
 
         // --- Bitplane 有効 ---
