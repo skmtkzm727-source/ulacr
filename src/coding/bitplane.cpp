@@ -9,7 +9,8 @@ uint64_t BitplaneDecomposer::zigzag_encode(Sample v) noexcept {
 }
 
 Sample BitplaneDecomposer::zigzag_decode(uint64_t z) noexcept {
-    return static_cast<Sample>((z >> 1) ^ (~(z & 1) + 1));
+    const uint64_t bits = (z >> 1) ^ (uint64_t{0} - (z & 1u));
+    return std::bit_cast<Sample>(bits);
 }
 
 uint32_t BitplaneDecomposer::bit_length(uint64_t v) noexcept {
