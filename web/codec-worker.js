@@ -1,6 +1,7 @@
 import createULACRModule from "./ulacr.js?v=ulacr-worker-20261109b";
 
 let codecPromise = null;
+let processing = false;
 
 function getCodec() {
   if (!codecPromise) {
@@ -44,6 +45,12 @@ self.addEventListener("message", async function(event) {
   function status(message) {
     self.postMessage({ type: "status", id: id, message: message });
   }
+
+  if (processing) {
+    self.postMessage({ type: "error", id: id, message: "別の音声処理が実行中です。完了後にもう一度お試しください。" });
+    return;
+  }
+  processing = true;
 
   try {
     if (!Number.isInteger(id)) throw new Error("処理IDが不正です。");
@@ -101,5 +108,6 @@ self.addEventListener("message", async function(event) {
         try { module._free(inputPtr); } catch (_) {}
       }
     }
+    processing = false;
   }
 });
