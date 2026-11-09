@@ -43,6 +43,18 @@ jobs:
           ./build-native/tools/ulacr-encode --profile ultra build-native/native-fixture.wav build-native/native-ultra.ulacr
           ./build-native/tools/ulacr-encode --profile classic build-native/native-fixture.wav build-native/native-classic.ulacr
 
+      - name: Verify classic byte identity against the frozen 0.2 implementation
+        run: |
+          git fetch --no-tags --depth=1 origin d9041ebe8c8bc8c8a306d45cf5ab32f80f235f3a
+          git worktree add --detach ../ulacr-legacy d9041ebe8c8bc8c8a306d45cf5ab32f80f235f3a
+          cmake -S ../ulacr-legacy -B ../ulacr-legacy/build \
+            -DULACR_BUILD_TOOLS=ON -DULACR_BUILD_TESTS=OFF \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build ../ulacr-legacy/build --parallel 2
+          ../ulacr-legacy/build/tools/ulacr-encode \
+            build-native/native-fixture.wav build-native/legacy-v02.ulacr
+          cmp build-native/legacy-v02.ulacr build-native/native-classic.ulacr
+
       - name: Validate benchmark harness
         run: python3 -m py_compile tools/bench/benchmark.py
 
