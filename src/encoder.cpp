@@ -626,6 +626,7 @@ Error Encoder::encode(const AudioBuffer& buf, const std::filesystem::path& outpu
     w.write_uvarint(groups.size());
     coding::RansEncoder rans_enc;
     coding::AdaptiveRangeEncoder range_enc;
+    coding::AdaptiveMixtureRangeEncoder mixture_range_enc;
     for (const auto& kv : groups) {
         const coding::ContextKey&    key     = kv.first;
         const std::vector<uint32_t>& symbols = kv.second;
@@ -644,10 +645,11 @@ Error Encoder::encode(const AudioBuffer& buf, const std::filesystem::path& outpu
         std::vector<uint32_t> counts(used_alphabet, 0);
         for (uint32_t sym : symbols) counts[sym]++;
 
-        w.write_uvarint(used_alphabet);
+        if (cfg.profile == EncoderProfile::Classic) w.write_uvarint(used_alphabet);
         if (cfg.profile == EncoderProfile::Ultra) {
-            // Version 0.3: deterministic adaptive CDF, reset for each context group.
-            auto encoded = range_enc.encode(symbols, used_alphabet);
+            // Version 0.3: flag the multi-expert adaptive CDF in the high bit.
+            w.write_uvarint(used_alphabet | 0x80000000u);
+            auto encoded = mixture_range_enc.encode(symbols, used_alphabet);
             w.write_uvarint(encoded.size());
             w.write_bytes(encoded);
         } else {
