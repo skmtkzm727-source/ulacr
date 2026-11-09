@@ -18,7 +18,7 @@
 #include <unordered_map>
 #include <algorithm>
 #include <cmath>
-#include <iostream>
+#include <numeric>
 #include <chrono>
 #include <bit>
 #include <system_error>
@@ -381,6 +381,7 @@ Error Encoder::encode(const AudioBuffer& buf, const std::filesystem::path& outpu
         uint8_t prediction_order = 0;
         bool prediction_reverse = false;
         uint8_t scale_shift = 0;
+        uint64_t scale_odd = 1;
         std::vector<Sample> prediction_seeds;
         std::vector<SubbandMeta> subbands;
     };
@@ -439,9 +440,6 @@ Error Encoder::encode(const AudioBuffer& buf, const std::filesystem::path& outpu
             meta[c][s].prediction_order = prediction.order;
             meta[c][s].prediction_reverse = prediction.reverse;
             meta[c][s].prediction_seeds = std::move(prediction.seeds);
-            if (cfg.profile == EncoderProfile::Ultra && s < 2)
-                std::cerr << "ENC c=" << c << " s=" << s << " order=" << unsigned(prediction.order)
-                          << " rev=" << prediction.reverse << " seeds=" << meta[c][s].prediction_seeds.size() << "\\n";
             wavelet_input = std::move(prediction.residual);
 
             // --- ウェーブレット変換 ---
@@ -453,29 +451,31 @@ Error Encoder::encode(const AudioBuffer& buf, const std::filesystem::path& outpu
                 coeffs.subbands.push_back(std::move(wavelet_input));
             }
 
-            // A1: remove a common power-of-two factor from all transformed
-            // coefficients in this segment. The inverse multiplies the exact
-            // integer coefficients back before the inverse wavelet/predictor.
+            // A1/A5: divide all transformed coefficients by their exact
+            // common integer gcd. Store its power-of-two and odd components;
+            // decoder multiplies them back before inverse wavelet.
             if (cfg.profile == EncoderProfile::Ultra && integer_pcm) {
-                uint32_t common_shift = 31;
-                bool has_nonzero = false;
+                uint64_t common_factor = 0;
                 for (const auto& band : coeffs.subbands) {
                     for (Sample value : band) {
-                        if (value == 0) continue;
-                        has_nonzero = true;
-                        common_shift = std::min<uint32_t>(
-                            common_shift,
-                            std::countr_zero(static_cast<uint64_t>(value)));
+                        const uint64_t magnitude = value >= 0
+                            ? static_cast<uint64_t>(value)
+                            : static_cast<uint64_t>(-(value + 1)) + 1u;
+                        common_factor = std::gcd(common_factor, magnitude);
+                        if (common_factor == 1) break;
                     }
+                    if (common_factor == 1) break;
                 }
-                if (has_nonzero) {
-                    common_shift = std::min<uint32_t>(common_shift, 31);
-                    const Sample divisor = static_cast<Sample>(1ull << common_shift);
-                    if (common_shift > 0) {
-                        for (auto& band : coeffs.subbands)
-                            for (Sample& value : band) value /= divisor;
-                        meta[c][s].scale_shift = static_cast<uint8_t>(common_shift);
-                    }
+                if (common_factor > 1) {
+                    const uint32_t shift = std::min<uint32_t>(
+                        std::countr_zero(common_factor), 31u);
+                    const uint64_t power_two = uint64_t{1} << shift;
+                    const uint64_t odd_factor = common_factor / power_two;
+                    for (auto& band : coeffs.subbands)
+                        for (Sample& value : band)
+                            value /= static_cast<Sample>(common_factor);
+                    meta[c][s].scale_shift = static_cast<uint8_t>(shift);
+                    meta[c][s].scale_odd = odd_factor;
                 }
             }
 
@@ -645,7 +645,11 @@ Error Encoder::encode(const AudioBuffer& buf, const std::filesystem::path& outpu
             for (Sample seed : sm.prediction_seeds) {
                 w.write_uvarint(detail::zigzag_u64(seed));
             }
-            if (cfg.profile == EncoderProfile::Ultra) w.write_byte(sm.scale_shift);
+            if (cfg.profile == EncoderProfile::Ultra) {
+                const bool has_odd_factor = sm.scale_odd > 1;
+                w.write_byte(static_cast<uint8_t>(sm.scale_shift | (has_odd_factor ? 0x80u : 0u)));
+                if (has_odd_factor) w.write_uvarint(sm.scale_odd);
+            }
         }
     }
 
