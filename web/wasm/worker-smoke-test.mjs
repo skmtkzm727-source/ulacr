@@ -135,7 +135,13 @@ assert.ok(stressEncoded.output?.length > 0);
 assert.ok(stressEncoded.progress.length > 0, "Block graph should report progress");
 const graphProgress = stressEncoded.progress.filter(item => item.phase === "block-graph");
 assert.ok(graphProgress.length > 0, "Block graph stage progress must be emitted");
-assert.ok(graphProgress.some(item => item.progress >= 0.99), "Block graph must complete");
+assert.ok(graphProgress.length >= 10,
+  "Stress input should create enough segments to exercise incremental indexing (" + graphProgress.length + " updates)");
+assert.ok(graphProgress.some(item => item.progress >= 0.099),
+  "Block graph progress must finish at the 10% encoder-stage boundary");
+const stressDecoded = await invoke(5, "decode", new Uint8Array(stressEncoded.output));
+assert.ok(!stressDecoded.error, stressDecoded.error?.message);
+assert.deepEqual(stressDecoded.output, stressInput, "Stress block-graph roundtrip must be byte-exact");
 assert.ok(stressElapsed < 20000,
   "20-second high-crossing audio must not stall block-graph analysis (" + stressElapsed + " ms)");
 
