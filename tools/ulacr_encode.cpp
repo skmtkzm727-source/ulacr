@@ -27,11 +27,7 @@ int main(int argc, char* argv[]) {
     if (positional.size() != 2) { usage(); return 1; }
     ulacr::CodecConfig cfg;
     cfg.profile = profile;
-    if (profile != ulacr::EncoderProfile::Classic) {
-        std::cerr << "Profile '" << (profile == ulacr::EncoderProfile::Ultra ? "ultra" : "auto")
-                  << "' is reserved for a later ULAC-R 2 phase; Phase 0 supports classic only.\n";
-        return 2;
-    }
+    if (profile != ulacr::EncoderProfile::Classic) cfg.max_predictor_order = 16;
     ulacr::Encoder enc(cfg);
     enc.set_progress_callback([](float p, std::string_view phase) {
         std::cout << "\r[" << phase << "] " << int(p * 100) << "%" << std::flush;
