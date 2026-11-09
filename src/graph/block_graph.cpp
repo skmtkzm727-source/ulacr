@@ -1,6 +1,7 @@
 #include "ulacr/graph/block_graph.hpp"
 #include "ulacr/graph/lsh.hpp"
 #include <cmath>
+#include <bit>
 #include <algorithm>
 
 namespace ulacr {
