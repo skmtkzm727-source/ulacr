@@ -356,6 +356,7 @@ Error Encoder::encode(const AudioBuffer& buf, const std::filesystem::path& outpu
     struct SegMeta {
         uint32_t levels_done = 0;
         uint8_t prediction_order = 0;
+        bool prediction_reverse = false;
         uint8_t scale_shift = 0;
         std::vector<Sample> prediction_seeds;
         std::vector<SubbandMeta> subbands;
