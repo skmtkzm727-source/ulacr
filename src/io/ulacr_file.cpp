@@ -2,10 +2,10 @@
 
 namespace ulacr::io {
 
-void write_file_magic(BitWriter& w) {
+void write_file_magic(BitWriter& w, uint8_t file_minor) {
     w.write_u32(ULACR_MAGIC);
     w.write_byte(static_cast<uint8_t>(ULACR_VERSION_MAJOR));
-    w.write_byte(static_cast<uint8_t>(ULACR_VERSION_MINOR));
+    w.write_byte(file_minor);
 }
 
 void read_and_check_file_magic(BitReader& r, uint8_t* minor_out) {
