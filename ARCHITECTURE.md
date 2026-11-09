@@ -36,4 +36,4 @@ WAV/RF64/RAW/AIFF -> WavReader -> Segmenter -> cost-gated Mid/Side
 - FFT: 実装済み。A4格子検出への統合は未実装。
 - K-SVD/OMP Spectral Dictionary: 研究用実装。classic主ビットストリームには未統合。
 ## 検証方針
-既存rANS/Wavelet/Bitplane+Island/Roundtripテストに加えて、適応混合レンジ符号、NLMS、逆向き走査、整数遅延、A1/A2/A5、Float32/64のビットパターン、WAV I/O、CRC破損検出、autoを検証する。CIは凍結0.2実装とのclassic出力バイト一致、ネイティブ符号化->WASM復号の0.2/0.3ビット完全一致、Pagesデプロイを行う。実音源ベンチはユーザー提供コーパスをファイル単位でFLAC -8と比較する。実音源コーパスは未投入のため、FLAC -8より小さいことやWAVの50%という目標は未検証。
+既存rANS/Wavelet/Bitplane+Island/Roundtripテストに加えて、適応混合レンジ符号、NLMS、逆向き走査、整数遅延、A1/A2/A5、数値解析を通さないFloat32/64のビットパターン、WAV I/O、CRC破損検出、autoを検証する。CIは凍結0.2実装とのclassic出力バイト一致、ネイティブ符号化->WASM復号の0.2/0.3ビット完全一致、Pagesデプロイを行う。実音源ベンチはユーザー提供コーパスをファイル単位でFLAC -8と比較する。実音源コーパスは未投入のため、FLAC -8より小さいことやWAVの50%という目標は未検証。
