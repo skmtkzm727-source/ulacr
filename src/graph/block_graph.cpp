@@ -63,29 +63,10 @@ BlockFeature BlockGraphBuilder::extract_feature(const AudioBuffer& buf,
     return f;
 }
 
-std::vector<uint32_t> BlockGraphBuilder::lsh_candidates(
-        const std::vector<BlockFeature>& nodes,
-        const BlockFeature&              query) const {
-
-    if (nodes.empty()) return {};
-
-    graph::LSHIndex index(FEATURE_DIM, cfg_.lsh_num_tables, cfg_.lsh_num_bits);
-    for (const auto& n : nodes) {
-        index.insert(n.block_id, n.feature_vec);
-    }
-
-    auto candidates = index.query(query.feature_vec);
-
-    // 自分自身は候補から除外する
-    candidates.erase(
-        std::remove(candidates.begin(), candidates.end(), query.block_id),
-        candidates.end());
-
-    return candidates;
-}
-
-BlockGraph BlockGraphBuilder::build(const AudioBuffer&         buf,
-                                    const std::vector<Segment>& segs) const {
+BlockGraph BlockGraphBuilder::build(
+        const AudioBuffer& buf,
+        const std::vector<Segment>& segs,
+        const std::function<void(float)>& progress) const {
     BlockGraph graph;
     graph.nodes.reserve(segs.size());
 
@@ -93,42 +74,60 @@ BlockGraph BlockGraphBuilder::build(const AudioBuffer&         buf,
         graph.nodes.push_back(extract_feature(buf, segs[i], static_cast<uint32_t>(i)));
     }
 
-    if (!cfg_.enable_block_graph) return graph;
+    if (!cfg_.enable_block_graph || graph.nodes.empty()) {
+        if (progress) progress(1.0f);
+        return graph;
+    }
 
-    // 因果性を保つため、各ノードについて「自分より前のノード」のみを候補とする。
-    // (デコード時に参照ブロックが既に復元済みであることを保証するため)
-    for (size_t i = 1; i < graph.nodes.size(); ++i) {
-        // 同じ長さのセグメントのみが差分対象になり得る
-        std::vector<BlockFeature> earlier;
-        earlier.reserve(i);
-        for (size_t j = 0; j < i; ++j) {
-            if (segs[j].length == segs[i].length) {
-                earlier.push_back(graph.nodes[j]);
-            }
-        }
-        if (earlier.empty()) continue;
+    // Reuse one LSH index per segment length. Rebuilding the index from all
+    // previous nodes for every target made this loop O(N^2) in index inserts.
+    // Query first, then insert the current node to preserve causal references.
+    std::unordered_map<uint32_t, graph::LSHIndex> indexes_by_length;
+    indexes_by_length.reserve(8);
 
-        auto candidates = lsh_candidates(earlier, graph.nodes[i]);
-
-        uint32_t best_ref = 0;
-        double   best_sim = -1.0;
-        bool     found    = false;
-        for (uint32_t cand_id : candidates) {
-            if (cand_id >= graph.nodes.size()) continue;
-            double sim = cosine_similarity(graph.nodes[i].feature_vec, graph.nodes[cand_id].feature_vec);
-            if (sim > best_sim) {
-                best_sim = sim;
-                best_ref = cand_id;
-                found = true;
-            }
+    const size_t total = graph.nodes.size();
+    for (size_t i = 0; i < total; ++i) {
+        const uint32_t length = segs[i].length;
+        auto index_it = indexes_by_length.find(length);
+        if (index_it == indexes_by_length.end()) {
+            index_it = indexes_by_length.try_emplace(
+                length, FEATURE_DIM, cfg_.lsh_num_tables, cfg_.lsh_num_bits).first;
         }
 
-        if (found && best_sim >= static_cast<double>(cfg_.similarity_threshold)) {
-            BlockEdge edge;
-            edge.ref_id = best_ref;
-            edge.tgt_id = static_cast<uint32_t>(i);
-            edge.similarity = static_cast<float>(best_sim);
-            graph.edges.push_back(edge);
+        // Only earlier blocks with the exact same segment length are in this
+        // index, so every returned reference is valid and causal.
+        if (i > 0) {
+            const auto candidates = index_it->second.query(graph.nodes[i].feature_vec);
+
+            uint32_t best_ref = 0;
+            double best_sim = -1.0;
+            bool found = false;
+            for (uint32_t candidate_id : candidates) {
+                if (candidate_id >= i) continue;
+                const double similarity = cosine_similarity(
+                    graph.nodes[i].feature_vec,
+                    graph.nodes[candidate_id].feature_vec);
+                if (similarity > best_sim) {
+                    best_sim = similarity;
+                    best_ref = candidate_id;
+                    found = true;
+                }
+            }
+
+            if (found && best_sim >= static_cast<double>(cfg_.similarity_threshold)) {
+                BlockEdge edge;
+                edge.ref_id = best_ref;
+                edge.tgt_id = static_cast<uint32_t>(i);
+                edge.similarity = static_cast<float>(best_sim);
+                graph.edges.push_back(edge);
+            }
+        }
+
+        // Insert only after searching so the node can never reference itself.
+        index_it->second.insert(static_cast<uint32_t>(i), graph.nodes[i].feature_vec);
+
+        if (progress && ((i + 1) % 16 == 0 || i + 1 == total)) {
+            progress(static_cast<float>(i + 1) / static_cast<float>(total));
         }
     }
 
