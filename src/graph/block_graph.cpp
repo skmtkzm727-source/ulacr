@@ -19,6 +19,40 @@ double cosine_similarity(const std::vector<float>& a, const std::vector<float>& 
     if (na <= 1e-12 || nb <= 1e-12) return 0.0;
     return dot / (std::sqrt(na) * std::sqrt(nb));
 }
+
+uint64_t signed_symbol_cost(Sample value) noexcept {
+    const uint64_t zz = value >= 0
+        ? static_cast<uint64_t>(value) * 2u
+        : static_cast<uint64_t>(-(value + 1)) * 2u + 1u;
+    if (zz == 0) return 0;
+    return 1u + (64u - static_cast<uint64_t>(std::countl_zero(zz)));
+}
+
+bool reference_is_profitable(const AudioBuffer& buf,
+                             const Segment& target,
+                             const Segment& reference) noexcept {
+    const bool integer_pcm = buf.spec.format == SampleFormat::Int16 ||
+                             buf.spec.format == SampleFormat::Int24 ||
+                             buf.spec.format == SampleFormat::Int32;
+    if (!integer_pcm || target.length != reference.length) return false;
+
+    uint64_t direct_cost = 0;
+    uint64_t delta_cost = 0;
+    for (size_t c = 0; c < buf.channels.size(); ++c) {
+        const auto& channel = buf.channels[c];
+        for (uint32_t i = 0; i < target.length; ++i) {
+            const Sample value = channel[target.offset + i];
+            const Sample base = channel[reference.offset + i];
+            direct_cost += signed_symbol_cost(value);
+            delta_cost += signed_symbol_cost(value - base);
+        }
+    }
+    // Include a conservative reference-edge overhead. Graph references that
+    // merely look similar are rejected unless their integer residual is
+    // measurably cheaper than storing the target block directly.
+    constexpr uint64_t EDGE_OVERHEAD_BITS = 64;
+    return direct_cost > delta_cost + EDGE_OVERHEAD_BITS;
+}
 } // namespace
 
 BlockGraphBuilder::BlockGraphBuilder(const CodecConfig& cfg) noexcept : cfg_(cfg) {}
@@ -119,7 +153,8 @@ BlockGraph BlockGraphBuilder::build(
                 }
             }
 
-            if (found && best_sim >= static_cast<double>(cfg_.similarity_threshold)) {
+            if (found && best_sim >= static_cast<double>(cfg_.similarity_threshold) &&
+                reference_is_profitable(buf, segs[i], segs[best_ref])) {
                 BlockEdge edge;
                 edge.ref_id = best_ref;
                 edge.tgt_id = static_cast<uint32_t>(i);
