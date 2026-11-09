@@ -15,6 +15,7 @@
 #include <fstream>
 #include <unordered_map>
 #include <algorithm>
+#include <cmath>
 
 namespace ulacr {
 
