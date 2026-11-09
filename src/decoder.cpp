@@ -9,6 +9,7 @@
 #include "ulacr/coding/bitplane.hpp"
 #include "ulacr/coding/context_model.hpp"
 #include "ulacr/coding/rans_coder.hpp"
+#include "ulacr/coding/range_coder.hpp"
 #include "pipeline_common.hpp"
 
 #include <fstream>
@@ -191,6 +192,7 @@ Error Decoder::decode(const std::filesystem::path& input_path, AudioBuffer& out)
 
         size_t num_groups = static_cast<size_t>(r.read_uvarint());
         coding::RansDecoder rans_dec;
+        coding::AdaptiveRangeDecoder range_dec;
         for (size_t g = 0; g < num_groups; ++g) {
             uint8_t stream_type = r.read_byte();
             uint8_t plane_idx   = r.read_byte();
@@ -203,14 +205,25 @@ Error Decoder::decode(const std::filesystem::path& input_path, AudioBuffer& out)
             GroupData gd;
             if (symbol_count > 0) {
                 uint32_t used_alphabet = static_cast<uint32_t>(r.read_uvarint());
-                std::vector<uint32_t> counts(used_alphabet);
-                for (auto& cnt : counts) cnt = static_cast<uint32_t>(r.read_uvarint());
-
-                uint64_t encoded_len = r.read_uvarint();
-                auto encoded_bytes = r.read_bytes(static_cast<size_t>(encoded_len));
-
-                auto table = coding::build_prob_table(counts, used_alphabet);
-                gd.symbols = rans_dec.decode(encoded_bytes, table, symbol_count);
+                if (used_alphabet == 0 || used_alphabet > 65536) {
+                    throw io::BitstreamError("invalid symbol alphabet");
+                }
+                if (file_minor >= 3) {
+                    uint64_t encoded_len = r.read_uvarint();
+                    auto encoded_bytes = r.read_bytes(static_cast<size_t>(encoded_len));
+                    try {
+                        gd.symbols = range_dec.decode(encoded_bytes, used_alphabet, symbol_count);
+                    } catch (const std::exception&) {
+                        throw io::BitstreamError("invalid adaptive range stream");
+                    }
+                } else {
+                    std::vector<uint32_t> counts(used_alphabet);
+                    for (auto& cnt : counts) cnt = static_cast<uint32_t>(r.read_uvarint());
+                    uint64_t encoded_len = r.read_uvarint();
+                    auto encoded_bytes = r.read_bytes(static_cast<size_t>(encoded_len));
+                    auto table = coding::build_prob_table(counts, used_alphabet);
+                    gd.symbols = rans_dec.decode(encoded_bytes, table, symbol_count);
+                }
             }
             group_data.emplace(key, std::move(gd));
         }
