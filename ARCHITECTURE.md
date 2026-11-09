@@ -1,103 +1,34 @@
-# ULAC-R C++ アーキテクチャ設計
-
-## プロジェクト構造
-
+# ULAC-R 2 アーキテクチャ
+## プロファイルと互換性
+- `classic`: 既存0.1/0.2パイプライン。後続のultra開発で変更しない。
+- `ultra`: B1/B2/B4/B5を中核とする新しい予測・確率混合エンジン。Phase 0では未実装。
+- `auto`: classicとultraの実符号長を比較して小さい方を採用。Phase 0では未実装。
+- 新しいストリーム形式は0.3。既存0.1/0.2はデコード互換を維持する。
+Phase 0ではCodecConfig::profileとCLI --profileを導入する。デフォルトはclassic。ultra/autoはclassicへ黙ってフォールバックせず未実装エラーを返す。
+## classicパイプライン（統合済み）
 ```
-ulac-r/
-├── CMakeLists.txt
-├── include/ulacr/
-│   ├── core/
-│   │   ├── types.hpp          ← 基本型 (AudioBuffer, Sample, Error…)
-│   │   └── codec_config.hpp   ← エンコード全設定
-│   ├── analysis/
-│   │   └── segmenter.hpp      ← 適応的セグメンテーション
-│   ├── graph/
-│   │   └── block_graph.hpp    ← Block Graph Compression (LSH)
-│   ├── dictionary/
-│   │   └── spectral_dict.hpp  ← Spectral Dictionary (K-SVD / OMP)
-│   ├── transform/
-│   │   └── wavelet.hpp        ← CDF 5/3 整数ウェーブレット
-│   ├── coding/
-│   │   ├── rans_coder.hpp     ← rANS エンコーダ / デコーダ
-│   │   ├── context_model.hpp  ← 多コンテキスト確率モデル
-│   │   ├── residual_island.hpp← Residual Island Coding
-│   │   └── bitplane.hpp       ← Bitplane Decomposition
-│   ├── encoder.hpp            ← パイプライン統括 (Pimpl)
-│   └── decoder.hpp            ← パイプライン統括 (Pimpl)
-├── src/                       ← 実装ファイル群
-├── tools/
-│   ├── ulacr_encode.cpp       ← CLI エンコーダ
-│   └── ulacr_decode.cpp       ← CLI デコーダ
-└── tests/
+WAV/RF64/RAW/AIFF -> WavReader -> Segmenter -> cost-gated Mid/Side
+ -> Block Graph / Harmonic -> fixed integer predictor (0..4)
+ -> CDF 5/3 integer Wavelet -> Residual Island + Bitplane/Bucket
+ -> Context groups + rANS -> .ulacr 0.1/0.2
 ```
-
-## エンコードパイプライン
-
-```
-WAV/AIFF/RAW
-     │
-     ▼
-┌─────────────────────┐
-│  WavReader          │  PCM → AudioBuffer (int64 正規化)
-└─────────────────────┘
-     │
-     ▼
-┌─────────────────────┐
-│  Segmenter          │  可変長ブロック分割
-│  (energy/flux/zcr)  │  min:256 ～ max:65536 samples
-└─────────────────────┘
-     │  Segment[]
-     ├──────────────────────────────────────────────┐
-     ▼                                              ▼
-┌─────────────────────┐                  ┌─────────────────────┐
-│  BlockGraphBuilder  │                  │  SpectralDictLearner│
-│  (LSH + similarity) │                  │  (K-SVD 全曲学習)   │
-└─────────────────────┘                  └─────────────────────┘
-     │  BlockGraph                             │  SpectralDictionary
-     │                                         │
-     └────────────────┬────────────────────────┘
-                      ▼
-          ┌─────────────────────┐
-          │  WaveletTransform   │  CDF 5/3 多段整数変換
-          └─────────────────────┘
-                      │  WaveletCoeffs
-                      ▼
-          ┌─────────────────────┐
-          │  ResidualIsland     │  ゼロ領域の効率的表現
-          │  + BitplaneDecomp   │  上位ビット優先符号化
-          └─────────────────────┘
-                      │
-                      ▼
-          ┌─────────────────────┐
-          │  ContextModel       │  多コンテキスト確率推定
-          │  + RansEncoder      │  rANS エントロピー符号化
-          └─────────────────────┘
-                      │
-                      ▼
-               .ulacr ファイル
-
-
-## クラス責務まとめ
-
-| クラス                | 責務                                      |
-|-----------------------|-------------------------------------------|
-| `Segmenter`           | 信号特性に応じた可変長ブロック分割         |
-| `BlockGraphBuilder`   | LSH で類似ブロックを発見、グラフ構築       |
-| `SpectralDictLearner` | K-SVD 辞書学習 + OMP スパース符号化        |
-| `WaveletTransform`    | CDF 5/3 整数リフティング変換（完全可逆）   |
-| `ContextModel`        | 多次元コンテキストによる適応的確率テーブル |
-| `RansEncoder/Decoder` | rANS エントロピー符号化 / 復号             |
-| `Encoder`             | 全コンポーネントのパイプライン管理 (Pimpl) |
-| `Decoder`             | 逆パイプライン管理 (Pimpl)                 |
-
-## 実装優先順位（推奨）
-
-1. **types + codec_config** ← 全体の土台
-2. **rANS coder**           ← コア圧縮エンジン（単体でテスト可）
-3. **Context model**        ← rANS に重ねる確率推定
-4. **Wavelet transform**    ← CDF 5/3 は比較的実装が明確
-5. **Segmenter**            ← ブロック分割
-6. **Spectral Dictionary**  ← K-SVD/OMP（数学的難度が高め）
-7. **Block Graph / LSH**    ← 構造圧縮の核心
-8. **Encoder / Decoder**    ← パイプライン結合
-```
+0.2ではMid/Sideと予測次数・seedを復号する。classicの出力バイト列を変更しないことがPhase 0の受け入れ条件。
+## ultra計画（未統合）
+| モジュール | 仕様 | 状態 |
+|---|---|---|
+| A1/A2/A5 | 未使用ビット、値集合、ゲイン痕跡 | 未実装 |
+| A3/A4 | ディザ・ロッシー由来コンテキスト | 未実装 |
+| B1 | OLS逐次予測 | 未実装 |
+| B2 | NLMSカスケード | 未実装 |
+| B3 | 後ろ向き適応Harmonic | 未実装 |
+| B4/B5 | 整数CDF混合・直接算術符号化・SSE/APM | 未実装 |
+| B6 | ウォームスタート | 未実装 |
+| C | デコーダ側変換付きマッチ | 未実装 |
+| D | 固定小数点オンラインNN | 任意・未実装 |
+| E | 実符号長ベースのメタ最適化 | 未実装 |
+候補はセグメント単位で実際の符号長を比較し、改善しない場合は採用しない。推定コストだけで採否を決めない。演算と状態更新順序を規格化し、ネイティブ/WASMで一致させる。
+## 研究用モジュール
+- FFT: 実装済み。A4格子検出への統合は未実装。
+- K-SVD/OMP Spectral Dictionary: 研究用実装。classic主ビットストリームには未統合。
+## 検証方針
+既存rANS/Wavelet/Bitplane+Island/Roundtripテストを維持。0.1/0.2 golden stream、ネイティブ符号化->WASM復号、PCM/Float全形式、壊れたファイルの堅牢性テストを追加する。実音源ベンチはジャンル別・ファイル別にFLAC -8と比較し、合成音だけで圧縮率を主張しない。

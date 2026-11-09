@@ -164,6 +164,7 @@ Error Encoder::encode(const AudioBuffer& buf, const std::filesystem::path& outpu
     if (!buf.valid() || buf.spec.num_samples == 0) return Error::InvalidArg;
 
     const CodecConfig& cfg = impl_->cfg;
+    if (cfg.profile != EncoderProfile::Classic) return Error::UnsupportedFormat;
     const uint32_t num_channels = buf.spec.num_channels;
     const bool integer_pcm = buf.spec.format == SampleFormat::Int16 ||
                              buf.spec.format == SampleFormat::Int24 ||
