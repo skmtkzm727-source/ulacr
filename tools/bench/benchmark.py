@@ -1,18 +1,55 @@
 #!/usr/bin/env python3
 """Per-file ULAC-R vs FLAC -8 benchmark for a supplied WAV corpus."""
-import argparse, csv, pathlib, shutil, subprocess, tempfile, time, wave
+import argparse, csv, pathlib, shutil, struct, subprocess, tempfile, time
 def run(cmd):
     start=time.perf_counter()
     p=subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     return p.returncode, time.perf_counter()-start
-def pcm_frames(path):
-    with wave.open(str(path),"rb") as w:
-        return (w.getparams(), w.readframes(w.getnframes()))
+def wav_payload(path):
+    """Read RIFF/RF64 WAVE format metadata and the exact data chunk bytes."""
+    data = path.read_bytes()
+    if len(data) < 12 or data[8:12] != b"WAVE" or data[:4] not in (b"RIFF", b"RF64"):
+        raise ValueError("not a RIFF/RF64 WAVE file")
+    rf64 = data[:4] == b"RF64"
+    offset = 12
+    ds64_data_size = None
+    fmt = None
+    payload = None
+    while offset + 8 <= len(data):
+        chunk_id = data[offset:offset + 4]
+        chunk_size = struct.unpack_from("<I", data, offset + 4)[0]
+        offset += 8
+        if chunk_id == b"ds64" and chunk_size >= 28 and offset + chunk_size <= len(data):
+            ds64_data_size = struct.unpack_from("<Q", data, offset + 8)[0]
+        actual_size = ds64_data_size if rf64 and chunk_id == b"data" and chunk_size == 0xffffffff else chunk_size
+        if actual_size is None or offset + actual_size > len(data):
+            raise ValueError("truncated WAVE chunk")
+        chunk = data[offset:offset + actual_size]
+        if chunk_id == b"fmt ":
+            if len(chunk) < 16:
+                raise ValueError("short fmt chunk")
+            tag, channels, rate, byte_rate, align, bits = struct.unpack_from("<HHIIHH", chunk)
+            valid_bits, channel_mask, subformat = bits, 0, b""
+            if tag == 0xfffe:
+                if len(chunk) < 40 or struct.unpack_from("<H", chunk, 16)[0] < 22:
+                    raise ValueError("invalid WAVE_FORMAT_EXTENSIBLE")
+                valid_bits, channel_mask = struct.unpack_from("<HI", chunk, 18)
+                subformat = chunk[24:40]
+                if subformat[:4] == b"\\x01\\x00\\x00\\x00":
+                    tag = 1
+                elif subformat[:4] == b"\\x03\\x00\\x00\\x00":
+                    tag = 3
+            fmt = (tag, channels, rate, byte_rate, align, bits, valid_bits, channel_mask, subformat)
+        elif chunk_id == b"data":
+            payload = chunk
+        offset += actual_size + (actual_size & 1)
+    if fmt is None or payload is None:
+        raise ValueError("WAVE fmt/data chunk missing")
+    return fmt, payload
 def pcm_equal(a,b):
     try:
-        pa,da=pcm_frames(a); pb,db=pcm_frames(b)
-        return (pa.nchannels,pa.sampwidth,pa.framerate,pa.nframes)==(pb.nchannels,pb.sampwidth,pb.framerate,pb.nframes) and da==db
-    except (wave.Error,EOFError):
+        return wav_payload(a) == wav_payload(b)
+    except (OSError, ValueError, struct.error):
         return False
 def main():
     ap=argparse.ArgumentParser()
