@@ -27,6 +27,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Run native round-trip tests
+        run: |
+          cmake -S . -B build-native \
+            -DULACR_BUILD_TOOLS=OFF \
+            -DULACR_BUILD_TESTS=ON \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-native --parallel 2
+          ctest --test-dir build-native --output-on-failure
+
       - name: Copy web interface
         run: |
           mkdir -p dist
