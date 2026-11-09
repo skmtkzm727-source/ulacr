@@ -295,14 +295,18 @@ std::vector<uint32_t> AdaptiveRangeDecoder::decode(std::span<const uint8_t> byte
 }
 
 std::vector<uint8_t> AdaptiveMixtureRangeEncoder::encode(
-        std::span<const uint32_t> symbols, uint32_t alphabet_size) const {
+        std::span<const uint32_t> symbols, uint32_t alphabet_size,
+        const std::function<void(float)>& progress) const {
     if (alphabet_size == 0 || alphabet_size > 65536)
         throw std::invalid_argument("invalid adaptive mixture alphabet");
     AdaptiveMixtureModel model(alphabet_size);
     uint64_t low = 0, high = TOP, pending = 0;
     BitOutput output;
+    const uint64_t progress_stride =
+        std::max<uint64_t>(1, static_cast<uint64_t>(symbols.size()) / 100u);
 
-    for (uint32_t symbol : symbols) {
+    for (size_t index = 0; index < symbols.size(); ++index) {
+        const uint32_t symbol = symbols[index];
         if (symbol >= alphabet_size) throw std::invalid_argument("symbol outside mixture alphabet");
         const MixtureSnapshot snapshot = model.snapshot();
         uint64_t cumulative = 0;
@@ -329,6 +333,12 @@ std::vector<uint8_t> AdaptiveMixtureRangeEncoder::encode(
             high = ((high << 1) | 1u) & TOP;
         }
         model.update(symbol, snapshot);
+        if (progress &&
+            ((static_cast<uint64_t>(index) + 1u) % progress_stride == 0u ||
+             index + 1u == symbols.size())) {
+            progress(static_cast<float>(index + 1u) /
+                     static_cast<float>(symbols.size()));
+        }
     }
 
     ++pending;
