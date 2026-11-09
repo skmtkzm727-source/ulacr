@@ -67,9 +67,11 @@ function makeStressWav() {
   const frames = sampleRate * 20;
   const pcm = Buffer.alloc(frames * 2);
   for (let i = 0; i < frames; i++) {
-    // A high zero-crossing rate creates many minimum-size segments and
-    // exercises the block-graph index under a large candidate set.
-    const sample = Math.round(12000 * Math.sin(2 * Math.PI * 1800 * i / sampleRate));
+    // Alternate silence and a high-crossing square wave every 256 samples.
+    // This forces the segmenter to create many minimum-size blocks and
+    // stresses repeated LSH buckets, the real worst case for this index.
+    const block = Math.floor(i / 256);
+    const sample = block % 2 === 0 ? 0 : (i % 2 === 0 ? 12000 : -12000);
     pcm.writeInt16LE(sample, i * 2);
   }
 
