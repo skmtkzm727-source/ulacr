@@ -6,7 +6,19 @@
 #include <fstream>
 #include <iterator>
 #include <string>
+#include <string_view>
 #include <vector>
+
+EM_JS(void, ulacr_emit_progress, (float progress, const char* phase), {
+    if (typeof postMessage === "function") {
+        postMessage({
+            type: "progress",
+            id: globalThis.__ulacr_active_request_id,
+            progress: progress,
+            phase: UTF8ToString(phase)
+        });
+    }
+});
 
 namespace {
 std::vector<std::uint8_t> output_bytes;
@@ -37,13 +49,20 @@ int process_file(const std::uint8_t* data, std::size_t size, bool decode) {
             if (!input.good()) return static_cast<int>(ulacr::Error::IOError);
         }
 
+        auto progress_callback = [](float progress, std::string_view phase) {
+            const std::string phase_text(phase);
+            ulacr_emit_progress(progress, phase_text.c_str());
+        };
+
         ulacr::Error error;
         if (decode) {
             ulacr::Decoder decoder;
+            decoder.set_progress_callback(progress_callback);
             error = decoder.decode_file(input_path, output_path);
         } else {
             ulacr::CodecConfig config = ulacr::CodecConfig::best_compression();
             ulacr::Encoder encoder(config);
+            encoder.set_progress_callback(progress_callback);
             error = encoder.encode_file(input_path, output_path);
         }
         if (error != ulacr::Error::OK) return static_cast<int>(error);
