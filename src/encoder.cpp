@@ -103,7 +103,8 @@ detail::PredictorResult choose_predictor_by_payload_cost(
         const WaveletTransform& wavelet,
         const CodecConfig& cfg,
         bool enabled,
-        uint8_t max_order) {
+        uint8_t max_order,
+        uint8_t nlms_shift = 0) {
     detail::PredictorResult best;
     best.residual.assign(input.begin(), input.end());
     best.estimated_bits = estimate_wavelet_payload_bits(best.residual, wavelet, cfg) + 8u;
@@ -127,6 +128,16 @@ detail::PredictorResult choose_predictor_by_payload_cost(
             best.estimated_bits = cost;
         }
     }
+    if (cfg.profile == EncoderProfile::Ultra && enabled && input.size() >= 5) {
+        auto adaptive = detail::make_adaptive_nlms_prediction(input, nlms_shift);
+        uint64_t cost = estimate_wavelet_payload_bits(adaptive.residual, wavelet, cfg) + 8u;
+        for (Sample seed : adaptive.seeds)
+            cost += 8u * detail::uvarint_size(detail::zigzag_u64(seed));
+        if (cost < best.estimated_bits) {
+            adaptive.estimated_bits = cost;
+            best = std::move(adaptive);
+        }
+    }
     return best;
 }
 
@@ -146,7 +157,8 @@ uint64_t estimate_audio_cost(const AudioBuffer& audio,
                 ? std::max<uint8_t>(cfg.max_predictor_order, 16)
                 : std::min<uint8_t>(cfg.max_predictor_order, 4);
             const auto predictor = choose_predictor_by_payload_cost(
-                samples, wavelet, cfg, cfg.enable_predictive_coding && integer_pcm, max_order);
+                samples, wavelet, cfg, cfg.enable_predictive_coding && integer_pcm, max_order,
+                detail::nlms_normalization_shift(audio.spec.format));
             total_bits += predictor.estimated_bits;
         }
     }
@@ -342,7 +354,8 @@ Error Encoder::encode(const AudioBuffer& buf, const std::filesystem::path& outpu
                 ? std::max<uint8_t>(cfg.max_predictor_order, 16)
                 : std::min<uint8_t>(cfg.max_predictor_order, 4);
             auto prediction = choose_predictor_by_payload_cost(
-                wavelet_input, wavelet, cfg, cfg.enable_predictive_coding && integer_pcm, max_order);
+                wavelet_input, wavelet, cfg, cfg.enable_predictive_coding && integer_pcm, max_order,
+                detail::nlms_normalization_shift(buf.spec.format));
             meta[c][s].prediction_order = prediction.order;
             meta[c][s].prediction_seeds = std::move(prediction.seeds);
             wavelet_input = std::move(prediction.residual);
