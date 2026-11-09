@@ -61,6 +61,8 @@ int process_file(const std::uint8_t* data, std::size_t size, bool decode) {
             error = decoder.decode_file(input_path, output_path);
         } else {
             ulacr::CodecConfig config = ulacr::CodecConfig::best_compression();
+            // The browser UI uses the current 0.3 Ultra encoder by default.
+            config.profile = ulacr::EncoderProfile::Ultra;
             ulacr::Encoder encoder(config);
             encoder.set_progress_callback(progress_callback);
             error = encoder.encode_file(input_path, output_path);
