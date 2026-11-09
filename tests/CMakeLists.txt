@@ -1,3 +1,7 @@
+add_executable(test_range_coder test_range_coder.cpp)
+target_link_libraries(test_range_coder PRIVATE ulacr)
+add_test(NAME test_range_coder COMMAND test_range_coder)
+
 add_executable(test_rans test_rans.cpp)
 target_link_libraries(test_rans PRIVATE ulacr)
 add_test(NAME test_rans COMMAND test_rans)
