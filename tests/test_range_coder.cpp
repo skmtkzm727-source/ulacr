@@ -38,6 +38,24 @@ int main() {
                 }
             }
         }
+
+        // Larger alphabets and long skewed runs exercise integer CDF
+        // normalization, posterior weight updates and rescaling.
+        for (uint32_t alphabet : {127u, 255u, 1024u}) {
+            std::vector<uint32_t> source;
+            source.reserve(2048);
+            for (uint32_t i = 0; i < 2048; ++i) {
+                const uint32_t value = (i % 97u == 0u)
+                    ? (rng() % alphabet) : ((i / 31u) % std::min<uint32_t>(alphabet, 7u));
+                source.push_back(value);
+            }
+            const auto bytes = mixture_encoder.encode(source, alphabet);
+            const auto restored = mixture_decoder.decode(bytes, alphabet, source.size());
+            if (source != restored) {
+                std::cerr << "Mixture stress mismatch, alphabet=" << alphabet << "\\n";
+                return 1;
+            }
+        }
     } catch (const std::exception& e) {
         std::cerr << e.what() << "\n";
         return 1;
