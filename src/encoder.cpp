@@ -361,7 +361,9 @@ Error Encoder::encode(const AudioBuffer& buf, const std::filesystem::path& outpu
         }
     } else {
         Segmenter segmenter(cfg);
-        segments = segmenter.segment(buf);
+        segments = segmenter.segment(buf, [&](float fraction) {
+            report(impl_->progress, 0.05f * fraction, "segmentation");
+        });
     }
     if (segments.empty()) return Error::InvalidArg;
 
