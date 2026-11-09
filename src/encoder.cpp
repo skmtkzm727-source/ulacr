@@ -75,7 +75,9 @@ Error Encoder::encode(const AudioBuffer& buf, const std::filesystem::path& outpu
     BlockGraphBuilder graph_builder(cfg);
     BlockGraph graph;
     if (cfg.enable_block_graph) {
-        graph = graph_builder.build(buf, segments);
+        graph = graph_builder.build(buf, segments, [&](float fraction) {
+            report(impl_->progress, 0.05f + 0.05f * fraction, "block-graph");
+        });
     }
 
     std::unordered_map<uint32_t, uint32_t> ref_map; // tgt_id -> ref_id
