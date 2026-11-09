@@ -145,6 +145,22 @@ assert.deepEqual(stressDecoded.output, stressInput, "Stress block-graph roundtri
 assert.ok(stressElapsed < 20000,
   "20-second high-crossing audio must not stall block-graph analysis (" + stressElapsed + " ms)");
 
+// Cross-runtime regression: native-generated 0.2 and 0.3 streams must decode
+// in the browser WASM worker to the exact original WAV byte sequence.
+async function verifyNativeStream(encodedPath, wavPath, id, label) {
+  const nativeStream = new Uint8Array(await readFile(path.resolve(encodedPath)));
+  const expectedWav = await readFile(path.resolve(wavPath));
+  const nativeDecoded = await invoke(id, "decode", nativeStream);
+  assert.ok(!nativeDecoded.error, label + ": " + nativeDecoded.error?.message);
+  assert.deepEqual(nativeDecoded.output, expectedWav, label + " native->WASM decode must be byte-exact");
+}
+if (process.argv[3] && process.argv[4]) {
+  await verifyNativeStream(process.argv[3], process.argv[4], 6, "native v0.3");
+}
+if (process.argv[5] && process.argv[6]) {
+  await verifyNativeStream(process.argv[5], process.argv[6], 7, "native v0.2");
+}
+
 console.log(
   "ULAC-R worker smoke test passed:",
   original.length, "bytes ->", encoded.output.length,
