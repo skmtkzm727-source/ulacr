@@ -132,6 +132,7 @@ Error Decoder::decode(const std::filesystem::path& input_path, AudioBuffer& out)
             analysis::HarmonicModel model;
             bool has_model = false;
             uint8_t prediction_order = 0;
+            bool prediction_reverse = false;
             uint8_t scale_shift = 0;
             std::vector<Sample> prediction_seeds;
         };
@@ -180,7 +181,10 @@ Error Decoder::decode(const std::filesystem::path& input_path, AudioBuffer& out)
                 }
 
                 if (file_minor >= 2) {
-                    m.prediction_order = r.read_byte();
+                    const uint8_t encoded_order = r.read_byte();
+                    if (file_minor >= 3) m.prediction_reverse = (encoded_order & 0x80u) != 0;
+                    m.prediction_order = file_minor >= 3
+                        ? static_cast<uint8_t>(encoded_order & 0x7fu) : encoded_order;
                     const uint8_t max_predictor_order = file_minor >= 3 ? 17 : 4;
                     if (m.prediction_order > max_predictor_order) {
                         throw io::BitstreamError("invalid predictor order");
@@ -371,12 +375,16 @@ Error Decoder::decode(const std::filesystem::path& input_path, AudioBuffer& out)
                 }
 
                 if (file_minor >= 2 && m.prediction_order > 0) {
+                    if (m.prediction_reverse)
+                        std::reverse(wavelet_input.begin(), wavelet_input.end());
                     wavelet_input = detail::inverse_predictor(
                         wavelet_input, m.prediction_order, m.prediction_seeds,
                         detail::nlms_normalization_shift(spec.format));
                     if (wavelet_input.size() != segments[s].length) {
                         return Error::CorruptedData;
                     }
+                    if (m.prediction_reverse)
+                        std::reverse(wavelet_input.begin(), wavelet_input.end());
                 }
 
                 SampleVec samples;
