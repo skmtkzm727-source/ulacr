@@ -56,7 +56,13 @@ jobs:
           cmp build-native/legacy-v02.ulacr build-native/native-classic.ulacr
 
       - name: Validate benchmark harness
-        run: python3 -m py_compile tools/bench/benchmark.py
+        run: |
+          python3 -m py_compile tools/bench/benchmark.py
+          python3 tools/bench/benchmark.py \
+            --corpus build-native \
+            --encoder ./build-native/tools/ulacr-encode \
+            --decoder ./build-native/tools/ulacr-decode \
+            --profile auto --output build-native/benchmark-smoke.csv
 
       - name: Copy web interface
         run: |
