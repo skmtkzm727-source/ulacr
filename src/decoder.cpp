@@ -15,6 +15,7 @@
 #include <fstream>
 #include <unordered_map>
 #include <algorithm>
+#include <limits>
 
 namespace ulacr {
 
@@ -130,6 +131,7 @@ Error Decoder::decode(const std::filesystem::path& input_path, AudioBuffer& out)
             analysis::HarmonicModel model;
             bool has_model = false;
             uint8_t prediction_order = 0;
+            uint8_t scale_shift = 0;
             std::vector<Sample> prediction_seeds;
         };
         std::vector<std::vector<SegMeta>> meta(
@@ -176,6 +178,10 @@ Error Decoder::decode(const std::filesystem::path& input_path, AudioBuffer& out)
                     for (uint8_t i = 0; i < m.prediction_order; ++i) {
                         m.prediction_seeds.push_back(
                             detail::unzigzag_sample(r.read_uvarint()));
+                    }
+                    if (file_minor >= 3) {
+                        m.scale_shift = r.read_byte();
+                        if (m.scale_shift > 31) throw io::BitstreamError("invalid coefficient scale");
                     }
                 }
             }
@@ -322,6 +328,19 @@ Error Decoder::decode(const std::filesystem::path& input_path, AudioBuffer& out)
                     }
 
                     coeffs.subbands[sb] = coding::ResidualIslandCoder::decode(island);
+                }
+
+                if (m.scale_shift > 0) {
+                    const Sample multiplier = static_cast<Sample>(1ull << m.scale_shift);
+                    for (auto& band : coeffs.subbands) {
+                        for (Sample& value : band) {
+                            if (value > std::numeric_limits<Sample>::max() / multiplier ||
+                                value < std::numeric_limits<Sample>::min() / multiplier) {
+                                throw io::BitstreamError("coefficient scale overflow");
+                            }
+                            value *= multiplier;
+                        }
+                    }
                 }
 
                 SampleVec wavelet_input;
