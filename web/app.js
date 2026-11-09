@@ -120,7 +120,7 @@ function getCodecWorker() {
   }
 
   const worker = new Worker(
-    new URL("./codec-worker.js?v=ulacr-ultra-20261109e", import.meta.url),
+    new URL("./codec-worker.js?v=ulacr-ultra-20261109f", import.meta.url),
     { type: "module" }
   );
 
