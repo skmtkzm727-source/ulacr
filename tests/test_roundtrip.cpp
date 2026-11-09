@@ -5,6 +5,7 @@
 #include <random>
 #include <iostream>
 #include <filesystem>
+#include <bit>
 
 using namespace ulacr;
 
@@ -122,6 +123,53 @@ int main() {
             ULACR_CHECK(advanced_size <= baseline_size);
             std::cout << "  [adaptive prediction + Mid/Side] "
                       << baseline_size << " -> " << advanced_size << " bytes\n";
+        }
+
+        // ULAC-R 2 v0.3: integer predictor up to order 16 and IEEE bit-pattern tests.
+        {
+            CodecConfig ultra = CodecConfig::fast();
+            ultra.profile = EncoderProfile::Ultra;
+            ultra.enable_block_graph = false;
+            ultra.enable_harmonic = false;
+            ultra.max_predictor_order = 16;
+            run_roundtrip(ultra, buf_correlated, "ultra_v03_integer");
+
+            AudioBuffer f32;
+            f32.spec.sample_rate = 48000;
+            f32.spec.num_channels = 1;
+            f32.spec.num_samples = 8;
+            f32.spec.format = SampleFormat::Float32;
+            f32.channels.assign(1, SampleVec(8));
+            const uint32_t f32_bits[] = {0x00000000u, 0x80000000u, 0x3f800000u,
+                0xbf800000u, 0x7fc12345u, 0x00000001u, 0x7f800000u, 0xff800000u};
+            for (size_t i = 0; i < 8; ++i)
+                f32.channels[0][i] = static_cast<Sample>(std::bit_cast<int32_t>(f32_bits[i]));
+            run_roundtrip(ultra, f32, "ultra_float32_bitpatterns");
+
+            AudioBuffer f64;
+            f64.spec.sample_rate = 48000;
+            f64.spec.num_channels = 1;
+            f64.spec.num_samples = 8;
+            f64.spec.format = SampleFormat::Float64;
+            f64.channels.assign(1, SampleVec(8));
+            const uint64_t f64_bits[] = {0x0000000000000000ull, 0x8000000000000000ull,
+                0x3ff0000000000000ull, 0xbff0000000000000ull, 0x7ff8123456789abcull,
+                0x0000000000000001ull, 0x7ff0000000000000ull, 0xfff0000000000000ull};
+            for (size_t i = 0; i < 8; ++i)
+                f64.channels[0][i] = std::bit_cast<Sample>(f64_bits[i]);
+            run_roundtrip(ultra, f64, "ultra_float64_bitpatterns");
+        }
+
+        // Auto is selected by complete serialized byte count, never estimated cost.
+        {
+            CodecConfig classic = CodecConfig::fast();
+            classic.enable_block_graph = false;
+            classic.enable_harmonic = false;
+            const uint64_t classic_size = run_roundtrip(classic, buf_correlated, "auto_reference_classic");
+            CodecConfig automatic = classic;
+            automatic.profile = EncoderProfile::Auto;
+            const uint64_t auto_size = run_roundtrip(automatic, buf_correlated, "auto_actual_size");
+            ULACR_CHECK(auto_size <= classic_size);
         }
 
         // --- 基本構成 (Wavelet + Residual Island + Bucket) ---
