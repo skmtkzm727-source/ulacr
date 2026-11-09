@@ -24,7 +24,7 @@ WAV/RF64/RAW/AIFF -> WavReader -> Segmenter -> cost-gated Mid/Side
 | A3/A4 | ディザ・ロッシー由来コンテキスト | 未実装 |
 | B1 | OLS逐次予測 | 未実装（整数有限差分予測を先行実装） |
 | B2 | 4タップ固定小数点NLMS | 0.3に統合（デコーダ同期、単段） |
-| B3 | 後ろ向き適応Harmonic | 未実装 |
+| B3 | 後ろ向き適応予測 | 0.3に統合（ブロック逆順走査。逆向きHarmonicは未実装） |
 | B4 | 適応order-0 CDFレンジ符号器 | 0.3に統合（Laplace初期事前、整数更新） |
 | B5 | SSE/APM確率補正 | 未実装 |
 | B6 | ウォームスタート | 未実装 |
