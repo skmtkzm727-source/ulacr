@@ -160,3 +160,13 @@ cmake --build build-wasm --parallel
 ```
 
 生成物は `build-wasm/web-dist/` に出力されます。Web UI（`web/index.html`、`web/app.js`、`web/styles.css`）と同じディレクトリに配置して、HTTPサーバー経由で開いてください。
+
+
+## ULAC-R 2 profiles
+
+The encoder CLI accepts `--profile classic`, `--profile ultra`, and `--profile auto`.
+`classic` writes the existing 0.2 stream. `ultra` writes version 0.3 and enables the extended reversible predictor and adaptive entropy path. `auto` encodes both profiles and selects the smaller completed file by actual byte count. The decoder accepts 0.1, 0.2, and 0.3 streams.
+
+Version 0.3 is under active development. The current predictor is an integer backward-difference predictor (orders up to 16), not yet the proposed OLS/NLMS mixture. The 0.3 adaptive range model is order-0 per existing context group; the planned logistic/Laplace/Student-t mixture, SSE/APM, forensic dither detection, warped matching and neural model are not claimed as implemented. Float32/Float64 in ultra are treated as opaque bit patterns and bypass arithmetic transforms.
+
+Run a real corpus comparison with `tools/bench/benchmark.py`; no claim of beating FLAC -8 or reaching 50% of WAV is made until measured on licensed real-world audio.
