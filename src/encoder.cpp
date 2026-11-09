@@ -209,7 +209,7 @@ uint64_t estimate_audio_cost(const AudioBuffer& audio,
             const std::span<const Sample> samples(
                 channel.data() + segment.offset, segment.length);
             const uint8_t max_order = cfg.profile == EncoderProfile::Ultra
-                ? std::max<uint8_t>(cfg.max_predictor_order, 16)
+                ? std::min<uint8_t>(cfg.max_predictor_order, 16)
                 : std::min<uint8_t>(cfg.max_predictor_order, 4);
             const auto predictor = choose_predictor_by_payload_cost(
                 samples, wavelet, cfg, cfg.enable_predictive_coding && integer_pcm, max_order,
