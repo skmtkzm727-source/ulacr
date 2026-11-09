@@ -5,7 +5,8 @@
 namespace ulacr::coding {
 
 uint64_t BitplaneDecomposer::zigzag_encode(Sample v) noexcept {
-    return (static_cast<uint64_t>(v) << 1) ^ static_cast<uint64_t>(v >> 63);
+    if (v >= 0) return static_cast<uint64_t>(v) * 2u;
+    return static_cast<uint64_t>(-(v + 1)) * 2u + 1u;
 }
 
 Sample BitplaneDecomposer::zigzag_decode(uint64_t z) noexcept {
