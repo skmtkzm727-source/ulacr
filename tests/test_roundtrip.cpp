@@ -1,6 +1,7 @@
 #include "ulacr/encoder.hpp"
 #include "ulacr/decoder.hpp"
 #include "test_common.hpp"
+#include "../src/pipeline_common.hpp"
 #include <cmath>
 #include <random>
 #include <iostream>
@@ -123,6 +124,21 @@ int main() {
             ULACR_CHECK(advanced_size <= baseline_size);
             std::cout << "  [adaptive prediction + Mid/Side] "
                       << baseline_size << " -> " << advanced_size << " bytes\n";
+        }
+
+        // NLMS encoder/decoder state synchronization is bit-exact.
+        {
+            SampleVec source(4096);
+            Sample value = 12000;
+            for (size_t i = 0; i < source.size(); ++i) {
+                value += static_cast<Sample>((i * 17u) % 31u) - 15;
+                source[i] = value;
+            }
+            const auto prediction = detail::make_adaptive_nlms_prediction(source, 8);
+            const auto restored = detail::inverse_predictor(
+                prediction.residual, prediction.order, prediction.seeds, 8);
+            ULACR_CHECK(prediction.order == 17);
+            ULACR_CHECK(restored == source);
         }
 
         // ULAC-R 2 v0.3: integer predictor up to order 16 and IEEE bit-pattern tests.
