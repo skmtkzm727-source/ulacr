@@ -121,7 +121,8 @@ detail::PredictorResult choose_predictor_by_payload_cost(
         const CodecConfig& cfg,
         bool enabled,
         uint8_t max_order,
-        uint8_t nlms_shift = 0) {
+        uint8_t nlms_shift = 0,
+        bool allow_reverse = true) {
     detail::PredictorResult best;
     best.residual.assign(input.begin(), input.end());
     best.estimated_bits = estimate_wavelet_payload_bits(best.residual, wavelet, cfg) + 8u;
@@ -153,6 +154,19 @@ detail::PredictorResult choose_predictor_by_payload_cost(
         if (cost < best.estimated_bits) {
             adaptive.estimated_bits = cost;
             best = std::move(adaptive);
+        }
+    }
+    // B3-lite: run the same deterministic integer predictors backward
+    // through the block. The reverse flag is stored in the high bit of the
+    // 0.3 predictor-order byte; seeds are the original tail samples.
+    if (cfg.profile == EncoderProfile::Ultra && enabled && allow_reverse && input.size() >= 5) {
+        SampleVec reversed(input.rbegin(), input.rend());
+        auto backward = choose_predictor_by_payload_cost(
+            reversed, wavelet, cfg, enabled, max_order, nlms_shift, false);
+        backward.estimated_bits += 8u; // reverse-direction flag byte
+        if (backward.estimated_bits < best.estimated_bits) {
+            backward.reverse = true;
+            best = std::move(backward);
         }
     }
     return best;
@@ -399,6 +413,7 @@ Error Encoder::encode(const AudioBuffer& buf, const std::filesystem::path& outpu
                 wavelet_input, wavelet, cfg, cfg.enable_predictive_coding && integer_pcm, max_order,
                 detail::nlms_normalization_shift(buf.spec.format));
             meta[c][s].prediction_order = prediction.order;
+            meta[c][s].prediction_reverse = prediction.reverse;
             meta[c][s].prediction_seeds = std::move(prediction.seeds);
             wavelet_input = std::move(prediction.residual);
 
@@ -597,7 +612,9 @@ Error Encoder::encode(const AudioBuffer& buf, const std::filesystem::path& outpu
             }
 
             // Version 0.2: ブロックごとの適応予測次数と初期履歴サンプル
-            w.write_byte(sm.prediction_order);
+            const uint8_t order_byte = static_cast<uint8_t>(
+                sm.prediction_order | ((cfg.profile == EncoderProfile::Ultra && sm.prediction_reverse) ? 0x80u : 0u));
+            w.write_byte(order_byte);
             for (Sample seed : sm.prediction_seeds) {
                 w.write_uvarint(detail::zigzag_u64(seed));
             }
