@@ -14,7 +14,7 @@ CodecConfig CodecConfig::best_compression() noexcept {
     c.lsh_num_tables           = 8;
     c.lsh_num_bits             = 12;
 
-    c.enable_spectral_dict     = true;
+    c.enable_spectral_dict     = false;
     c.dict_size                = 1024;
     c.dict_atom_size           = 256;
     c.ksvd_iterations          = 20;
