@@ -4,7 +4,7 @@ namespace ulacr {
 
 CodecConfig CodecConfig::best_compression() noexcept {
     CodecConfig c;
-    c.min_block_size           = 256;
+    c.min_block_size           = 1024;
     c.max_block_size           = 65536;
     c.energy_threshold         = 0.02f;
     c.spectral_flux_threshold  = 0.05f;
@@ -19,11 +19,14 @@ CodecConfig CodecConfig::best_compression() noexcept {
     c.dict_atom_size           = 256;
     c.ksvd_iterations          = 20;
 
+    c.enable_predictive_coding = true;
+    c.enable_stereo_mid_side   = true;
+
     c.enable_wavelet           = true;
     c.wavelet_levels           = 6;
 
     c.enable_harmonic          = true;
-    c.max_harmonics            = 32;
+    c.max_harmonics            = 16;
 
     c.enable_residual_island   = true;
     c.enable_bitplane          = true;
@@ -47,6 +50,9 @@ CodecConfig CodecConfig::fast() noexcept {
     c.dict_size                = 512;
     c.dict_atom_size           = 128;
     c.ksvd_iterations          = 5;
+
+    c.enable_predictive_coding = true;
+    c.enable_stereo_mid_side   = true;
 
     c.enable_wavelet           = true;
     c.wavelet_levels           = 3;
