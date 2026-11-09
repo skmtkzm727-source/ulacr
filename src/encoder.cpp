@@ -63,6 +63,21 @@ Error Encoder::encode(const AudioBuffer& buf, const std::filesystem::path& outpu
 
     const CodecConfig& cfg = impl_->cfg;
     const uint32_t num_channels = buf.spec.num_channels;
+    const bool integer_pcm = buf.spec.format == SampleFormat::Int16 ||
+                             buf.spec.format == SampleFormat::Int24 ||
+                             buf.spec.format == SampleFormat::Int32;
+    AudioBuffer coding_buf = buf;
+    const bool use_mid_side = cfg.enable_stereo_mid_side && integer_pcm && num_channels == 2;
+    if (use_mid_side) {
+        for (uint64_t i = 0; i < buf.spec.num_samples; ++i) {
+            const Sample left = buf.channels[0][i];
+            const Sample right = buf.channels[1][i];
+            const Sample side = left - right;
+            const Sample mid = right + detail::floor_div2(side);
+            coding_buf.channels[0][i] = mid;
+            coding_buf.channels[1][i] = side;
+        }
+    }
 
     // --- 1. 適応的セグメンテーション ---
     report(impl_->progress, 0.0f, "segmentation");
@@ -75,7 +90,7 @@ Error Encoder::encode(const AudioBuffer& buf, const std::filesystem::path& outpu
     BlockGraphBuilder graph_builder(cfg);
     BlockGraph graph;
     if (cfg.enable_block_graph) {
-        graph = graph_builder.build(buf, segments, [&](float fraction) {
+        graph = graph_builder.build(coding_buf, segments, [&](float fraction) {
             report(impl_->progress, 0.05f + 0.05f * fraction, "block-graph");
         });
     }
@@ -101,6 +116,8 @@ Error Encoder::encode(const AudioBuffer& buf, const std::filesystem::path& outpu
     };
     struct SegMeta {
         uint32_t levels_done = 0;
+        uint8_t prediction_order = 0;
+        std::vector<Sample> prediction_seeds;
         std::vector<SubbandMeta> subbands;
     };
     std::vector<std::vector<SegMeta>> meta(
@@ -115,7 +132,7 @@ Error Encoder::encode(const AudioBuffer& buf, const std::filesystem::path& outpu
     for (uint32_t c = 0; c < num_channels; ++c) {
         for (size_t s = 0; s < segments.size(); ++s) {
             const Segment& seg = segments[s];
-            std::span<const Sample> orig(buf.channels[c].data() + seg.offset, seg.length);
+            std::span<const Sample> orig(coding_buf.channels[c].data() + seg.offset, seg.length);
             recon_segments[c][s].assign(orig.begin(), orig.end());
 
             SampleVec wavelet_input;
@@ -145,6 +162,15 @@ Error Encoder::encode(const AudioBuffer& buf, const std::filesystem::path& outpu
             } else {
                 wavelet_input.assign(orig.begin(), orig.end());
             }
+
+            // --- 適応整数予測 ---
+            // 既存のモデル差分/グラフ差分に重ねて、次数0〜4の固定予測器を
+            // 実測コストで比較する。予測が不利なら次数0（恒等変換）を選ぶ。
+            auto prediction = detail::choose_predictor(
+                wavelet_input, cfg.enable_predictive_coding && integer_pcm);
+            meta[c][s].prediction_order = prediction.order;
+            meta[c][s].prediction_seeds = std::move(prediction.seeds);
+            wavelet_input = std::move(prediction.residual);
 
             // --- ウェーブレット変換 ---
             WaveletCoeffs coeffs;
@@ -230,6 +256,7 @@ Error Encoder::encode(const AudioBuffer& buf, const std::filesystem::path& outpu
     flags.enable_harmonic    = cfg.enable_harmonic;
     flags.enable_bitplane    = cfg.enable_bitplane;
     flags.max_harmonics      = static_cast<uint8_t>(cfg.max_harmonics);
+    flags.stereo_mid_side    = use_mid_side;
     io::write_decode_flags(w, flags);
 
     // セグメント長一覧
@@ -266,6 +293,12 @@ Error Encoder::encode(const AudioBuffer& buf, const std::filesystem::path& outpu
                         for (double p : m.phases)     w.write_f32(static_cast<float>(p));
                     }
                 }
+            }
+
+            // Version 0.2: ブロックごとの適応予測次数と初期履歴サンプル
+            w.write_byte(sm.prediction_order);
+            for (Sample seed : sm.prediction_seeds) {
+                w.write_uvarint(detail::zigzag_u64(seed));
             }
         }
     }
