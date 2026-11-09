@@ -139,6 +139,15 @@ assert.ok(graphProgress.length >= 10,
   "Stress input should create enough segments to exercise incremental indexing (" + graphProgress.length + " updates)");
 assert.ok(graphProgress.some(item => item.progress >= 0.099),
   "Block graph progress must finish at the 10% encoder-stage boundary");
+
+const entropyProgress = stressEncoded.progress.filter(
+  item => item.phase === "entropy-coding"
+);
+assert.ok(entropyProgress.length >= 2,
+  "Ultra range coding must emit incremental progress events");
+assert.ok(entropyProgress.some(item => item.progress >= 0.94),
+  "Ultra range coding progress must reach the end of the entropy-coding stage");
+
 const stressDecoded = await invoke(5, "decode", new Uint8Array(stressEncoded.output));
 assert.ok(!stressDecoded.error, stressDecoded.error?.message);
 assert.deepEqual(stressDecoded.output, stressInput, "Stress block-graph roundtrip must be byte-exact");
@@ -169,5 +178,6 @@ console.log(
 console.log(
   "Block-graph stress test passed:",
   stressInput.length, "bytes in", stressElapsed, "ms;",
-  graphProgress.length, "progress updates"
+  graphProgress.length, "block-graph updates;",
+  entropyProgress.length, "entropy-coding updates"
 );
