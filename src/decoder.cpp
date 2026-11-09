@@ -177,7 +177,9 @@ Error Decoder::decode(const std::filesystem::path& input_path, AudioBuffer& out)
                     }
                 }
             }
-        
+            }
+        }
+
         // --- コンテキストグループ（確率テーブル + rANS復号）---
         report(impl_ ? impl_->progress : ProgressCallback{}, 0.3f, "entropy-decoding");
 
