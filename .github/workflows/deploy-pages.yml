@@ -8,6 +8,9 @@ on:
       - "src/**"
       - "include/**"
       - "tests/**"
+      - "tools/**"
+      - "README.md"
+      - "ARCHITECTURE.md"
       - "web/**"
       - ".github/workflows/deploy-pages.yml"
   workflow_dispatch:
@@ -36,6 +39,12 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release
           cmake --build build-native --parallel 2
           ctest --test-dir build-native --output-on-failure
+          ./build-native/tools/gen_test_wav build-native/native-fixture.wav
+          ./build-native/tools/ulacr-encode --profile ultra build-native/native-fixture.wav build-native/native-ultra.ulacr
+          ./build-native/tools/ulacr-encode --profile classic build-native/native-fixture.wav build-native/native-classic.ulacr
+
+      - name: Validate benchmark harness
+        run: python3 -m py_compile tools/bench/benchmark.py
 
       - name: Copy web interface
         run: |
@@ -54,7 +63,7 @@ jobs:
           '
           cp build-wasm/web-dist/ulacr.js dist/
           cp build-wasm/web-dist/ulacr.wasm dist/
-          node web/wasm/worker-smoke-test.mjs dist
+          node web/wasm/worker-smoke-test.mjs dist build-native/native-ultra.ulacr build-native/native-fixture.wav build-native/native-classic.ulacr build-native/native-fixture.wav
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
