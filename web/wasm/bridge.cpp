@@ -20,6 +20,15 @@ int process_file(const std::uint8_t* data, std::size_t size, bool decode) {
     const char* input_path = decode ? "/input.ulacr" : "/input.wav";
     const char* output_path = decode ? "/output.wav" : "/output.ulacr";
 
+    struct TempFileCleanup {
+        const char* input;
+        const char* output;
+        ~TempFileCleanup() {
+            std::remove(input);
+            std::remove(output);
+        }
+    } cleanup{input_path, output_path};
+
     try {
         {
             std::ofstream input(input_path, std::ios::binary | std::ios::trunc);
@@ -51,13 +60,9 @@ int process_file(const std::uint8_t* data, std::size_t size, bool decode) {
             return static_cast<int>(ulacr::Error::IOError);
         }
 
-        std::remove(input_path);
-        std::remove(output_path);
         return static_cast<int>(ulacr::Error::OK);
     } catch (...) {
         output_bytes.clear();
-        std::remove(input_path);
-        std::remove(output_path);
         return static_cast<int>(ulacr::Error::OutOfMemory);
     }
 }
