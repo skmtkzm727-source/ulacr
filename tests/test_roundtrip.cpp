@@ -1,6 +1,8 @@
 #include "ulacr/encoder.hpp"
 #include "ulacr/decoder.hpp"
 #include "test_common.hpp"
+#include "ulacr/io/wav_reader.hpp"
+#include "ulacr/io/wav_writer.hpp"
 #include "../src/pipeline_common.hpp"
 #include <cmath>
 #include <random>
@@ -73,6 +75,14 @@ uint64_t run_roundtrip(const CodecConfig& cfg, const AudioBuffer& buf, const std
     ULACR_CHECK(err == Error::OK);
 
     ULACR_CHECK(buffers_equal(buf, decoded));
+
+    // Also verify the serialized WAV payload, including opaque float bit patterns.
+    const auto wav_tmp = std::filesystem::path(tmp.string() + ".wav");
+    ULACR_CHECK(dec.decode_file(tmp, wav_tmp) == Error::OK);
+    AudioBuffer wav_decoded;
+    ULACR_CHECK(io::WavReader::read(wav_tmp, wav_decoded) == Error::OK);
+    ULACR_CHECK(buffers_equal(buf, wav_decoded));
+    std::filesystem::remove(wav_tmp);
 
     auto orig_size = static_cast<uint64_t>(buf.spec.num_samples) * buf.spec.num_channels * buf.spec.bytes_per_sample();
     auto comp_size = std::filesystem::file_size(tmp);
