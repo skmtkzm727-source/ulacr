@@ -8,7 +8,7 @@ void write_file_magic(BitWriter& w) {
     w.write_byte(static_cast<uint8_t>(ULACR_VERSION_MINOR));
 }
 
-void read_and_check_file_magic(BitReader& r) {
+void read_and_check_file_magic(BitReader& r, uint8_t* minor_out) {
     uint32_t magic = r.read_u32();
     if (magic != ULACR_MAGIC) {
         throw BitstreamError("invalid ULAC-R magic number");
@@ -18,7 +18,10 @@ void read_and_check_file_magic(BitReader& r) {
     if (major != static_cast<uint8_t>(ULACR_VERSION_MAJOR)) {
         throw BitstreamError("unsupported ULAC-R major version");
     }
-    (void)minor;
+    if (minor > static_cast<uint8_t>(ULACR_VERSION_MINOR)) {
+        throw BitstreamError("unsupported ULAC-R minor version");
+    }
+    if (minor_out != nullptr) *minor_out = minor;
 }
 
 void write_audio_spec(BitWriter& w, const AudioSpec& spec) {
@@ -46,9 +49,10 @@ void write_decode_flags(BitWriter& w, const DecodeFlags& flags) {
     w.write_byte(flags.enable_harmonic    ? 1 : 0);
     w.write_byte(flags.enable_bitplane    ? 1 : 0);
     w.write_byte(flags.max_harmonics);
+    w.write_byte(flags.stereo_mid_side ? 1 : 0);
 }
 
-DecodeFlags read_decode_flags(BitReader& r) {
+DecodeFlags read_decode_flags(BitReader& r, uint8_t file_minor) {
     DecodeFlags flags;
     flags.wavelet_levels     = r.read_byte();
     flags.enable_wavelet     = r.read_byte() != 0;
@@ -56,6 +60,7 @@ DecodeFlags read_decode_flags(BitReader& r) {
     flags.enable_harmonic    = r.read_byte() != 0;
     flags.enable_bitplane    = r.read_byte() != 0;
     flags.max_harmonics      = r.read_byte();
+    if (file_minor >= 2) flags.stereo_mid_side = r.read_byte() != 0;
     return flags;
 }
 
