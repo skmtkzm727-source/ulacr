@@ -15,6 +15,7 @@
 #include <fstream>
 #include <unordered_map>
 #include <algorithm>
+#include <iostream>
 #include <limits>
 
 namespace ulacr {
@@ -209,6 +210,10 @@ Error Decoder::decode(const std::filesystem::path& input_path, AudioBuffer& out)
                         m.scale_shift = r.read_byte();
                         if (m.scale_shift > 31) throw io::BitstreamError("invalid coefficient scale");
                     }
+                    if (file_minor >= 3 && s < 2)
+                        std::cerr << "DEC c=" << c << " s=" << s << " order=" << unsigned(m.prediction_order)
+                                  << " rev=" << m.prediction_reverse << " seeds=" << m.prediction_seeds.size()
+                                  << " shift=" << unsigned(m.scale_shift) << "\\n";
                 }
             }
         }
