@@ -115,13 +115,31 @@ function showFile(file) {
 
 async function getCodec() {
   if (!codecPromise) {
-    setStatus("音声エンジン（WebAssembly）を読み込んでいます…", true);
-    codecPromise = createULACRModule({
-      locateFile: function(path) {
-        return new URL(path, import.meta.url).href;
+    codecPromise = (async function() {
+      setStatus("音声エンジンのファイルを取得しています…", true);
+
+      // SafariでのWASMストリーミング取得に依存せず、先にバイナリを取得してから初期化する。
+      const wasmUrl = new URL("./ulacr.wasm", import.meta.url);
+      const response = await fetch(wasmUrl.href, { cache: "no-store" });
+      if (!response.ok) {
+        throw new Error("WASMファイルを取得できません（HTTP " + response.status + "）。ページを再読み込みしてください。");
       }
-    }).catch(function(error) {
+
+      const wasmBinary = await response.arrayBuffer();
+      if (wasmBinary.byteLength < 8) {
+        throw new Error("WASMファイルが空、または不完全です。GitHub Pagesの公開状態を確認してください。");
+      }
+
+      setStatus("音声エンジンを初期化しています…", true);
+      return await createULACRModule({
+        wasmBinary: wasmBinary,
+        onAbort: function(reason) {
+          console.error("ULAC-R WebAssembly aborted:", reason);
+        }
+      });
+    })().catch(function(error) {
       codecPromise = null;
+      console.error("ULAC-R engine initialization failed:", error);
       throw error;
     });
   }
