@@ -141,8 +141,11 @@ function getCodecWorker() {
         "done": "最終処理中"
       };
       const label = phaseLabels[data.phase] || "音声データを処理中";
-      const percent = Number.isFinite(data.progress)
-        ? "（" + Math.round(data.progress * 100) + "%）"
+      const displayProgress = data.phase === "segmentation"
+        ? data.progress / 0.05
+        : data.progress;
+      const percent = Number.isFinite(displayProgress)
+        ? "（" + Math.round(Math.max(0, Math.min(1, displayProgress)) * 100) + "%）"
         : "";
       setStatus(label + percent, true);
       return;
