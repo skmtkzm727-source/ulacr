@@ -1,6 +1,7 @@
 #include "ulacr/graph/lsh.hpp"
 #include <random>
 #include <algorithm>
+#include <unordered_set>
 
 namespace ulacr::graph {
 
@@ -48,15 +49,28 @@ void LSHIndex::insert(uint32_t id, const std::vector<float>& vec) {
 
 std::vector<uint32_t> LSHIndex::query(const std::vector<float>& vec) const {
     std::vector<uint32_t> result;
+    // Avoid quadratic duplicate checks and pathological work when many
+    // identical blocks land in one very large bucket (e.g. repeated tones).
+    constexpr size_t MAX_CANDIDATES_PER_TABLE = 64;
+    result.reserve(static_cast<size_t>(num_tables_) * MAX_CANDIDATES_PER_TABLE);
+    std::unordered_set<uint32_t> seen;
+    seen.reserve(static_cast<size_t>(num_tables_) * MAX_CANDIDATES_PER_TABLE);
 
-    for (uint32_t t = 0; t < num_tables_; ++t) {
-        uint32_t h = compute_hash(vec, t);
-        auto it = tables_[t].find(h);
-        if (it == tables_[t].end()) continue;
-        for (uint32_t id : it->second) {
-            if (std::find(result.begin(), result.end(), id) == result.end()) {
-                result.push_back(id);
-            }
+    for (uint32_t table = 0; table < num_tables_; ++table) {
+        const uint32_t hash = compute_hash(vec, table);
+        const auto it = tables_[table].find(hash);
+        if (it == tables_[table].end() || it->second.empty()) continue;
+
+        const auto& bucket = it->second;
+        const size_t count = std::min(bucket.size(), MAX_CANDIDATES_PER_TABLE);
+        for (size_t i = 0; i < count; ++i) {
+            // For oversized buckets, sample the full insertion range instead
+            // of repeatedly examining only the oldest entries.
+            const size_t bucket_index = (bucket.size() <= MAX_CANDIDATES_PER_TABLE)
+                ? i
+                : (i * (bucket.size() - 1)) / (count - 1);
+            const uint32_t id = bucket[bucket_index];
+            if (seen.insert(id).second) result.push_back(id);
         }
     }
 
