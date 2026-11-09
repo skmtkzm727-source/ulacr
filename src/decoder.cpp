@@ -15,7 +15,6 @@
 #include <fstream>
 #include <unordered_map>
 #include <algorithm>
-#include <iostream>
 #include <limits>
 
 namespace ulacr {
@@ -135,6 +134,7 @@ Error Decoder::decode(const std::filesystem::path& input_path, AudioBuffer& out)
             uint8_t prediction_order = 0;
             bool prediction_reverse = false;
             uint8_t scale_shift = 0;
+            uint64_t scale_odd = 1;
             std::vector<Sample> prediction_seeds;
         };
         std::vector<std::vector<SegMeta>> meta(
@@ -207,13 +207,16 @@ Error Decoder::decode(const std::filesystem::path& input_path, AudioBuffer& out)
                         }
                     }
                     if (file_minor >= 3) {
-                        m.scale_shift = r.read_byte();
+                        const uint8_t encoded_scale = r.read_byte();
+                        const bool has_odd_factor = (encoded_scale & 0x80u) != 0;
+                        m.scale_shift = static_cast<uint8_t>(encoded_scale & 0x7fu);
                         if (m.scale_shift > 31) throw io::BitstreamError("invalid coefficient scale");
+                        if (has_odd_factor) {
+                            m.scale_odd = r.read_uvarint();
+                            if (m.scale_odd <= 1 || (m.scale_odd & 1u) == 0)
+                                throw io::BitstreamError("invalid odd scale factor");
+                        }
                     }
-                    if (file_minor >= 3 && s < 2)
-                        std::cerr << "DEC c=" << c << " s=" << s << " order=" << unsigned(m.prediction_order)
-                                  << " rev=" << m.prediction_reverse << " seeds=" << m.prediction_seeds.size()
-                                  << " shift=" << unsigned(m.scale_shift) << "\\n";
                 }
             }
         }
@@ -375,8 +378,11 @@ Error Decoder::decode(const std::filesystem::path& input_path, AudioBuffer& out)
                     coeffs.subbands[sb] = coding::ResidualIslandCoder::decode(island);
                 }
 
-                if (m.scale_shift > 0) {
-                    const Sample multiplier = static_cast<Sample>(1ull << m.scale_shift);
+                if (m.scale_shift > 0 || m.scale_odd > 1) {
+                    const uint64_t power_two = uint64_t{1} << m.scale_shift;
+                    if (m.scale_odd > static_cast<uint64_t>(std::numeric_limits<Sample>::max()) / power_two)
+                        throw io::BitstreamError("coefficient scale factor overflow");
+                    const Sample multiplier = static_cast<Sample>(m.scale_odd * power_two);
                     for (auto& band : coeffs.subbands) {
                         for (Sample& value : band) {
                             if (value > std::numeric_limits<Sample>::max() / multiplier ||
