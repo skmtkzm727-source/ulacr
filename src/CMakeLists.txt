@@ -19,6 +19,7 @@ add_library(ulacr STATIC
     transform/fft.cpp
     # coding
     coding/rans_coder.cpp
+    coding/range_coder.cpp
     coding/context_model.cpp
     coding/residual_island.cpp
     coding/bitplane.cpp
