@@ -68,15 +68,21 @@ BlockGraph BlockGraphBuilder::build(
         const std::vector<Segment>& segs,
         const std::function<void(float)>& progress) const {
     BlockGraph graph;
-    graph.nodes.reserve(segs.size());
-
-    for (size_t i = 0; i < segs.size(); ++i) {
-        graph.nodes.push_back(extract_feature(buf, segs[i], static_cast<uint32_t>(i)));
-    }
-
-    if (!cfg_.enable_block_graph || graph.nodes.empty()) {
+    if (!cfg_.enable_block_graph || segs.empty()) {
         if (progress) progress(1.0f);
         return graph;
+    }
+
+    graph.nodes.reserve(segs.size());
+    const size_t total = segs.size();
+
+    // Feature extraction is a full pass over the audio samples. Report part
+    // of the stage progress here too, so long files do not appear frozen at 5%.
+    for (size_t i = 0; i < total; ++i) {
+        graph.nodes.push_back(extract_feature(buf, segs[i], static_cast<uint32_t>(i)));
+        if (progress && ((i + 1) % 16 == 0 || i + 1 == total)) {
+            progress(0.2f * static_cast<float>(i + 1) / static_cast<float>(total));
+        }
     }
 
     // Reuse one LSH index per segment length. Rebuilding the index from all
@@ -85,7 +91,6 @@ BlockGraph BlockGraphBuilder::build(
     std::unordered_map<uint32_t, graph::LSHIndex> indexes_by_length;
     indexes_by_length.reserve(8);
 
-    const size_t total = graph.nodes.size();
     for (size_t i = 0; i < total; ++i) {
         const uint32_t length = segs[i].length;
         auto index_it = indexes_by_length.find(length);
@@ -127,7 +132,7 @@ BlockGraph BlockGraphBuilder::build(
         index_it->second.insert(static_cast<uint32_t>(i), graph.nodes[i].feature_vec);
 
         if (progress && ((i + 1) % 16 == 0 || i + 1 == total)) {
-            progress(static_cast<float>(i + 1) / static_cast<float>(total));
+            progress(0.2f + 0.8f * static_cast<float>(i + 1) / static_cast<float>(total));
         }
     }
 
