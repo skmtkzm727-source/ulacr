@@ -1,5 +1,3 @@
-import createULACRModule from "./ulacr.js";
-
 const fileInput = document.getElementById("fileInput");
 const chooseButton = document.getElementById("chooseButton");
 const dropzone = document.getElementById("dropzone");
@@ -25,7 +23,9 @@ const audioPlayer = document.getElementById("audioPlayer");
 
 let selectedFile = null;
 let selectedKind = null;
-let codecPromise = null;
+let codecWorker = null;
+let nextWorkerRequestId = 1;
+const workerRequests = new Map();
 let latestEncodedBytes = null;
 let downloadUrl = null;
 let audioUrl = null;
@@ -113,93 +113,79 @@ function showFile(file) {
   }
 }
 
-async function getCodec() {
-  if (!codecPromise) {
-    codecPromise = (async function() {
-      setStatus("音声エンジンのファイルを取得しています…", true);
-
-      const wasmUrl = new URL("./ulacr.wasm", import.meta.url);
-      const response = await fetch(wasmUrl.href, { cache: "no-store" });
-      if (!response.ok) {
-        throw new Error("WASMファイルを取得できません（HTTP " + response.status + "）。");
-      }
-
-      const wasmBytes = await response.arrayBuffer();
-      if (wasmBytes.byteLength < 8 || !WebAssembly.validate(wasmBytes)) {
-        throw new Error("WASMファイルの検証に失敗しました。公開ファイルが壊れている可能性があります。");
-      }
-
-      setStatus("WebAssemblyをコンパイルしています…", true);
-      const compiledModule = await WebAssembly.compile(wasmBytes);
-
-      setStatus("音声エンジンを起動しています…", true);
-      let initialized = false;
-      const module = await Promise.race([
-        createULACRModule({
-          // Emscripten側の自動fetch/streamingを使わず、Safariでも同じ手順で同期instantiateする。
-          instantiateWasm: function(imports, receiveInstance) {
-            try {
-              const instance = new WebAssembly.Instance(compiledModule, imports);
-              initialized = true;
-              receiveInstance(instance, compiledModule);
-              return instance.exports;
-            } catch (error) {
-              console.error("WASM instantiate failed:", error);
-              throw error;
-            }
-          }
-        }),
-        new Promise(function(_, reject) {
-          setTimeout(function() {
-            if (!initialized) reject(new Error("WebAssemblyの起動が20秒以内に完了しませんでした。Safariを再読み込みして再試行してください。"));
-          }, 20000);
-        })
-      ]);
-
-      if (!module || typeof module._ulacr_encode !== "function" || typeof module._ulacr_decode !== "function") {
-        throw new Error("音声エンジンの初期化後に必要な関数が見つかりません。");
-      }
-      return module;
-    })().catch(function(error) {
-      codecPromise = null;
-      console.error("ULAC-R engine initialization failed:", error);
-      throw error;
-    });
+function getCodecWorker() {
+  if (codecWorker) return codecWorker;
+  if (typeof Worker === "undefined") {
+    throw new Error("このブラウザではWeb Workerを利用できません。Safariを最新版に更新してください。");
   }
-  return codecPromise;
+
+  const worker = new Worker(
+    new URL("./codec-worker.js?v=ulacr-worker-20261109b", import.meta.url),
+    { type: "module" }
+  );
+
+  worker.addEventListener("message", function(event) {
+    const data = event.data || {};
+    const request = workerRequests.get(data.id);
+    if (!request) return;
+
+    if (data.type === "status") {
+      setStatus(data.message || "音声を処理しています…", true);
+      return;
+    }
+
+    workerRequests.delete(data.id);
+    if (data.type === "result" && data.output instanceof ArrayBuffer) {
+      request.resolve(new Uint8Array(data.output));
+    } else {
+      request.reject(new Error(data.message || "音声処理に失敗しました。"));
+    }
+  });
+
+  function failWorker(message) {
+    const error = new Error(message || "音声処理ワーカーでエラーが発生しました。");
+    for (const request of workerRequests.values()) request.reject(error);
+    workerRequests.clear();
+    worker.terminate();
+    if (codecWorker === worker) codecWorker = null;
+  }
+
+  worker.addEventListener("error", function(event) {
+    event.preventDefault();
+    failWorker(event.message || "音声処理ワーカーを起動できませんでした。");
+  });
+  worker.addEventListener("messageerror", function() {
+    failWorker("音声処理ワーカーとの通信に失敗しました。");
+  });
+
+  codecWorker = worker;
+  return worker;
 }
 
-async function runCodec(mode, bytes) {
-  const module = await getCodec();
-  const inputPtr = module._malloc(bytes.length);
-  if (!inputPtr) throw new Error("ブラウザのメモリを確保できませんでした。ファイルサイズを小さくしてお試しください。");
+function runCodec(mode, bytes, transferInput) {
+  return new Promise(function(resolve, reject) {
+    let worker;
+    try {
+      worker = getCodecWorker();
+    } catch (error) {
+      reject(error);
+      return;
+    }
 
-  let code = 0;
-  try {
-    module.HEAPU8.set(bytes, inputPtr);
-    code = mode === "encode"
-      ? module._ulacr_encode(inputPtr, bytes.length)
-      : module._ulacr_decode(inputPtr, bytes.length);
-  } finally {
-    module._free(inputPtr);
-  }
+    const id = nextWorkerRequestId++;
+    const canTransfer = transferInput &&
+      bytes.byteOffset === 0 &&
+      bytes.byteLength === bytes.buffer.byteLength;
+    const input = canTransfer ? bytes.buffer : bytes.slice().buffer;
 
-  if (code !== 0) {
-    const messages = {
-      "-1": "ファイル形式または入力内容を確認してください。",
-      "-2": "この音声形式には対応していません。PCM WAVをお試しください。",
-      "-3": "ファイルの読み書きに失敗しました。",
-      "-4": "ULAC-Rファイルが破損しているか、形式が一致しません。"
-    };
-    throw new Error(messages[String(code)] || ("変換エラー（" + code + "）"));
-  }
-
-  const outputPtr = module._ulacr_output_ptr();
-  const outputSize = module._ulacr_output_size();
-  if (!outputPtr || !outputSize) throw new Error("変換結果を取得できませんでした。");
-  const result = module.HEAPU8.slice(outputPtr, outputPtr + outputSize);
-  module._ulacr_clear_output();
-  return result;
+    workerRequests.set(id, { resolve: resolve, reject: reject });
+    try {
+      worker.postMessage({ id: id, mode: mode, input: input }, [input]);
+    } catch (error) {
+      workerRequests.delete(id);
+      reject(error);
+    }
+  });
 }
 
 function setBusy(message) {
@@ -221,9 +207,9 @@ function endBusy(message) {
 encodeButton.addEventListener("click", async function() {
   if (!selectedFile || selectedKind !== "wav") return;
   try {
-    setBusy("WAVを読み込み、ULAC-Rへ圧縮しています。ファイルサイズによって時間がかかります…");
+    setBusy("音声処理エンジンを準備しています…");
     const source = new Uint8Array(await selectedFile.arrayBuffer());
-    const bytes = await runCodec("encode", source);
+    const bytes = await runCodec("encode", source, true);
     latestEncodedBytes = bytes;
     const blob = new Blob([bytes], { type: "application/octet-stream" });
     const outputName = selectedFile.name.replace(/\.(wav|wave)$/i, "") + ".ulacr";
@@ -238,8 +224,8 @@ encodeButton.addEventListener("click", async function() {
 });
 
 async function decodeAndPlay(bytes, sourceSize, outputName, showDownload) {
-  setBusy("ULAC-Rを復元しています…");
-  const wavBytes = await runCodec("decode", bytes);
+  setBusy("音声処理エンジンを準備しています…");
+  const wavBytes = await runCodec("decode", bytes, showDownload);
   const blob = new Blob([wavBytes], { type: "audio/wav" });
   setAudio(blob);
   if (showDownload) {
