@@ -165,8 +165,8 @@ cmake --build build-wasm --parallel
 ## ULAC-R 2 profiles
 
 The encoder CLI accepts `--profile classic`, `--profile ultra`, and `--profile auto`.
-`classic` writes the existing 0.2 stream. `ultra` writes version 0.3 and enables the extended reversible predictor and adaptive entropy path. `auto` encodes both profiles and selects the smaller completed file by actual byte count. The decoder accepts 0.1, 0.2, and 0.3 streams.
+`classic` writes the existing 0.2 stream byte-for-byte. `ultra` writes version 0.3 with a CRC32 trailer, extended integer predictors, fixed-point NLMS, backward scanning, integer-delay matching, reversible common-factor scaling, sparse-symbol mapping, and an integer Bayesian mixture range coder. Float32/Float64 payloads are kept as opaque bit patterns. `auto` encodes and fully decodes both candidates, then selects the smaller bit-exact file. The decoder reads 0.1/0.2 and the current 0.3 format.
 
-Version 0.3 is under active development. The current predictor is an integer backward-difference predictor (orders up to 16), not yet the proposed OLS/NLMS mixture. The 0.3 adaptive range model is order-0 per existing context group; the planned logistic/Laplace/Student-t mixture, SSE/APM, forensic dither detection, warped matching and neural model are not claimed as implemented. Float32/Float64 in ultra are treated as opaque bit patterns and bypass arithmetic transforms.
+Some planned research features are still not implemented: OLS/Cholesky prediction, exact dither PRNG identification/removal, MDCT-grid/cutoff forensics, full SSE/APM, fractional-delay/gain/sinc matching, and the optional neural model. The current mixture uses integerized logistic-like, Laplace-like and Student-t-like priors plus adaptive histogram/context experts; it is not a full continuous-density Logistic/Laplace/Student-t implementation. No FLAC -8 superiority or 50%-of-WAV ratio is claimed without a real licensed music corpus.
 
 Run a real corpus comparison with `tools/bench/benchmark.py`; no claim of beating FLAC -8 or reaching 50% of WAV is made until measured on licensed real-world audio.
