@@ -167,7 +167,8 @@ Error Decoder::decode(const std::filesystem::path& input_path, AudioBuffer& out)
 
                 if (file_minor >= 2) {
                     m.prediction_order = r.read_byte();
-                    if (m.prediction_order > 4) {
+                    const uint8_t max_predictor_order = file_minor >= 3 ? 16 : 4;
+                    if (m.prediction_order > max_predictor_order) {
                         throw io::BitstreamError("invalid predictor order");
                     }
                     m.prediction_seeds.reserve(m.prediction_order);
