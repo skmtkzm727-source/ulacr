@@ -9,6 +9,8 @@
 #include <iostream>
 #include <filesystem>
 #include <bit>
+#include <fstream>
+#include <iterator>
 
 using namespace ulacr;
 
@@ -215,6 +217,31 @@ int main() {
             for (size_t i = 0; i < 8; ++i)
                 f64.channels[0][i] = std::bit_cast<Sample>(f64_bits[i]);
             run_roundtrip(ultra, f64, "ultra_float64_bitpatterns");
+        }
+
+        // ULAC-R 0.3 CRC32 detects any byte mutation before decoding.
+        {
+            const auto path = std::filesystem::temp_directory_path() / "ulacr_crc_test.ulacr";
+            CodecConfig ultra = CodecConfig::fast();
+            ultra.profile = EncoderProfile::Ultra;
+            ultra.enable_block_graph = false;
+            ultra.enable_harmonic = false;
+            Encoder enc(ultra);
+            ULACR_CHECK(enc.encode(buf_correlated, path) == Error::OK);
+            std::ifstream in(path, std::ios::binary);
+            std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(in)),
+                                       std::istreambuf_iterator<char>());
+            ULACR_CHECK(bytes.size() > 16);
+            bytes[10] ^= 0x20u;
+            {
+                std::ofstream out(path, std::ios::binary | std::ios::trunc);
+                out.write(reinterpret_cast<const char*>(bytes.data()),
+                          static_cast<std::streamsize>(bytes.size()));
+            }
+            Decoder dec;
+            AudioBuffer decoded;
+            ULACR_CHECK(dec.decode(path, decoded) == Error::CorruptedData);
+            std::filesystem::remove(path);
         }
 
         // Auto is selected by complete serialized byte count, never estimated cost.
