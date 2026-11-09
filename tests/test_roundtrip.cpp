@@ -160,6 +160,16 @@ int main() {
             ultra.max_predictor_order = 16;
             run_roundtrip(ultra, buf_correlated, "ultra_v03_integer");
 
+            AudioBuffer periodic;
+            periodic.spec.sample_rate = 48000;
+            periodic.spec.num_channels = 1;
+            periodic.spec.num_samples = 8192;
+            periodic.spec.format = SampleFormat::Int16;
+            periodic.channels.assign(1, SampleVec(periodic.spec.num_samples));
+            for (uint64_t i = 0; i < periodic.spec.num_samples; ++i)
+                periodic.channels[0][i] = static_cast<Sample>((i % 37u) * 311u) - 5500;
+            run_roundtrip(ultra, periodic, "ultra_integer_delay_match");
+
             AudioBuffer scaled = buf_correlated;
             scaled.spec.format = SampleFormat::Int24;
             for (auto& channel : scaled.channels)
