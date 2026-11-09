@@ -353,12 +353,23 @@ Error Encoder::encode(const AudioBuffer& buf, const std::filesystem::path& outpu
         // Float samples are opaque IEEE bit patterns. Do not run numeric
         // energy/range analysis over their signed integer representations.
         const uint32_t block_size = std::max<uint32_t>(1u, cfg.max_block_size);
+        int last_percent = -1;
         for (uint64_t offset = 0; offset < buf.spec.num_samples;) {
             const uint32_t length = static_cast<uint32_t>(
                 std::min<uint64_t>(block_size, buf.spec.num_samples - offset));
             segments.push_back(Segment{offset, length, 0.0f});
             offset += length;
+            const int percent = static_cast<int>(
+                (100.0 * static_cast<double>(offset)) /
+                static_cast<double>(buf.spec.num_samples));
+            if (percent != last_percent) {
+                report(impl_->progress, 0.05f *
+                    static_cast<float>(offset) /
+                    static_cast<float>(buf.spec.num_samples), "segmentation");
+                last_percent = percent;
+            }
         }
+        report(impl_->progress, 0.05f, "segmentation");
     } else {
         Segmenter segmenter(cfg);
         segments = segmenter.segment(buf, [&](float fraction) {
