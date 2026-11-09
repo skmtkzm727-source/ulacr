@@ -190,12 +190,27 @@ inline SampleVec inverse_adaptive_nlms(std::span<const Sample> residual,
     return output;
 }
 
+inline SampleVec inverse_delay_match(std::span<const Sample> residual,
+                                              std::span<const Sample> seeds) {
+    if (seeds.empty()) return {};
+    const Sample lag_value = seeds[0];
+    if (lag_value <= 0 || lag_value > 64) return {};
+    const size_t lag = static_cast<size_t>(lag_value);
+    if (seeds.size() != lag + 1 || residual.size() < lag) return {};
+    SampleVec output(residual.size(), 0);
+    std::copy(seeds.begin() + 1, seeds.end(), output.begin());
+    for (size_t i = lag; i < output.size(); ++i)
+        output[i] = residual[i] + output[i - lag];
+    return output;
+}
+
 inline SampleVec inverse_predictor(std::span<const Sample> residual,
                                    uint8_t order,
                                    std::span<const Sample> seeds,
                                    uint8_t normalization_shift = 0) {
     if (order == 0) return SampleVec(residual.begin(), residual.end());
     if (order == 17) return inverse_adaptive_nlms(residual, seeds, normalization_shift);
+    if (order == 18) return inverse_delay_match(residual, seeds);
     if (order > 16 || seeds.size() != order || residual.size() < order) return {};
 
     SampleVec output(residual.begin(), residual.end());
