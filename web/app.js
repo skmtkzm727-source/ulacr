@@ -130,10 +130,20 @@ function getCodecWorker() {
     if (!request) return;
 
     if (data.type === "status") {
+      if (data.message && data.message.includes("読み込んでいます")) {
+        if (request.timeoutId) clearTimeout(request.timeoutId);
+        request.timeoutId = setTimeout(function() {
+          failWorker("WebAssemblyの初期化が45秒以内に完了しませんでした。ネットワーク接続を確認して、ページを再読み込みしてください。");
+        }, 45000);
+      } else if (request.timeoutId) {
+        clearTimeout(request.timeoutId);
+        request.timeoutId = null;
+      }
       setStatus(data.message || "音声を処理しています…", true);
       return;
     }
 
+    if (request.timeoutId) clearTimeout(request.timeoutId);
     workerRequests.delete(data.id);
     if (data.type === "result" && data.output instanceof ArrayBuffer) {
       request.resolve(new Uint8Array(data.output));
@@ -144,7 +154,10 @@ function getCodecWorker() {
 
   function failWorker(message) {
     const error = new Error(message || "音声処理ワーカーでエラーが発生しました。");
-    for (const request of workerRequests.values()) request.reject(error);
+    for (const request of workerRequests.values()) {
+      if (request.timeoutId) clearTimeout(request.timeoutId);
+      request.reject(error);
+    }
     workerRequests.clear();
     worker.terminate();
     if (codecWorker === worker) codecWorker = null;
@@ -178,7 +191,7 @@ function runCodec(mode, bytes, transferInput) {
       bytes.byteLength === bytes.buffer.byteLength;
     const input = canTransfer ? bytes.buffer : bytes.slice().buffer;
 
-    workerRequests.set(id, { resolve: resolve, reject: reject });
+    workerRequests.set(id, { resolve: resolve, reject: reject, timeoutId: null });
     try {
       worker.postMessage({ id: id, mode: mode, input: input }, [input]);
     } catch (error) {
