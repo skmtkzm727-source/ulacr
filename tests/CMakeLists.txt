@@ -17,3 +17,7 @@ add_test(NAME test_bitplane_island COMMAND test_bitplane_island)
 add_executable(test_roundtrip test_roundtrip.cpp)
 target_link_libraries(test_roundtrip PRIVATE ulacr)
 add_test(NAME test_roundtrip COMMAND test_roundtrip)
+
+add_executable(test_checksum test_checksum.cpp)
+target_link_libraries(test_checksum PRIVATE ulacr)
+add_test(NAME test_checksum COMMAND test_checksum)
