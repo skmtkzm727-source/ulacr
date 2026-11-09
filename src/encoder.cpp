@@ -1,4 +1,5 @@
 #include "ulacr/encoder.hpp"
+#include "ulacr/decoder.hpp"
 #include "ulacr/io/wav_reader.hpp"
 #include "ulacr/io/ulacr_file.hpp"
 #include "ulacr/io/bitstream.hpp"
@@ -45,6 +46,22 @@ namespace {
 
 void report(const ProgressCallback& cb, float p, std::string_view phase) {
     if (cb) cb(p, phase);
+}
+
+bool audio_buffers_equal_exact(const AudioBuffer& a, const AudioBuffer& b) {
+    return a.spec.sample_rate == b.spec.sample_rate &&
+           a.spec.num_channels == b.spec.num_channels &&
+           a.spec.num_samples == b.spec.num_samples &&
+           a.spec.format == b.spec.format &&
+           a.spec.source_format == b.spec.source_format &&
+           a.channels == b.channels;
+}
+
+bool encoded_file_is_exact(const std::filesystem::path& path, const AudioBuffer& source) {
+    Decoder decoder;
+    AudioBuffer decoded;
+    return decoder.decode(path, decoded) == Error::OK &&
+           audio_buffers_equal_exact(source, decoded);
 }
 
 uint64_t estimate_binary_plane_bits(const std::vector<uint8_t>& plane) {
@@ -201,19 +218,44 @@ Error Encoder::encode(const AudioBuffer& buf, const std::filesystem::path& outpu
         Encoder ultra_encoder(ultra_cfg);
         const Error classic_err = classic_encoder.encode(buf, classic_tmp);
         const Error ultra_err = ultra_encoder.encode(buf, ultra_tmp);
-        if (classic_err != Error::OK || ultra_err != Error::OK) {
+        const bool classic_valid = classic_err == Error::OK &&
+                                   encoded_file_is_exact(classic_tmp, buf);
+        const bool ultra_valid = ultra_err == Error::OK &&
+                                 encoded_file_is_exact(ultra_tmp, buf);
+        if (!classic_valid && !ultra_valid) {
             std::error_code ignored;
             std::filesystem::remove(classic_tmp, ignored);
             std::filesystem::remove(ultra_tmp, ignored);
-            return classic_err != Error::OK ? classic_err : ultra_err;
+            if (classic_err != Error::OK) return classic_err;
+            if (ultra_err != Error::OK) return ultra_err;
+            return Error::CorruptedData;
         }
+
+        const std::filesystem::path* winner = nullptr;
         std::error_code fs_error;
-        const auto classic_size = std::filesystem::file_size(classic_tmp, fs_error);
-        if (fs_error) return Error::IOError;
-        const auto ultra_size = std::filesystem::file_size(ultra_tmp, fs_error);
-        if (fs_error) return Error::IOError;
-        const auto& winner = ultra_size < classic_size ? ultra_tmp : classic_tmp;
-        std::filesystem::copy_file(winner, output_path,
+        if (classic_valid && ultra_valid) {
+            const auto classic_size = std::filesystem::file_size(classic_tmp, fs_error);
+            const bool classic_size_ok = !fs_error;
+            fs_error.clear();
+            const auto ultra_size = std::filesystem::file_size(ultra_tmp, fs_error);
+            const bool ultra_size_ok = !fs_error;
+            if (classic_size_ok && ultra_size_ok)
+                winner = ultra_size < classic_size ? &ultra_tmp : &classic_tmp;
+            else if (classic_size_ok)
+                winner = &classic_tmp;
+            else if (ultra_size_ok)
+                winner = &ultra_tmp;
+        } else {
+            winner = classic_valid ? &classic_tmp : &ultra_tmp;
+        }
+        if (winner == nullptr) {
+            std::error_code ignored;
+            std::filesystem::remove(classic_tmp, ignored);
+            std::filesystem::remove(ultra_tmp, ignored);
+            return Error::IOError;
+        }
+        fs_error.clear();
+        std::filesystem::copy_file(*winner, output_path,
             std::filesystem::copy_options::overwrite_existing, fs_error);
         std::error_code ignored;
         std::filesystem::remove(classic_tmp, ignored);
