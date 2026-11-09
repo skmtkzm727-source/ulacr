@@ -173,8 +173,8 @@ int main() {
             AudioBuffer scaled = buf_correlated;
             scaled.spec.format = SampleFormat::Int24;
             for (auto& channel : scaled.channels)
-                for (Sample& value : channel) value *= 64;
-            run_roundtrip(ultra, scaled, "ultra_a1_common_factor");
+                for (Sample& value : channel) value *= 192;
+            run_roundtrip(ultra, scaled, "ultra_a1_a5_common_factor");
 
             AudioBuffer sparse;
             sparse.spec.sample_rate = 48000;
