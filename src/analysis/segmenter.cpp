@@ -62,26 +62,38 @@ float Segmenter::compute_local_entropy(const SampleVec& ch, uint64_t pos, uint32
         std::span<const Sample>(ch.data() + pos, len)));
 }
 
-bool Segmenter::is_boundary(float ec, float sf, float zcr, float le) const noexcept {
-    (void)le; // 現状は energy / spectral flux / zcr の組み合わせで判定する
-    return (ec  > cfg_.energy_threshold) ||
-           (sf  > cfg_.spectral_flux_threshold) ||
-           (zcr > 0.2f);
-}
-
-std::vector<Segment> Segmenter::segment(const AudioBuffer& buf) const {
+std::vector<Segment> Segmenter::segment(
+        const AudioBuffer& buf,
+        const std::function<void(float)>& progress) const {
     std::vector<Segment> segments;
     if (!buf.valid() || buf.spec.num_samples == 0) return segments;
 
     const uint64_t total = buf.spec.num_samples;
 
+    // Report progress for both the downmix pass and the boundary scan.
+    // Throttle callbacks to roughly 1% steps to avoid flooding the worker.
+    float last_progress = -1.0f;
+    auto emit_progress = [&](float fraction, bool force) {
+        fraction = std::clamp(fraction, 0.0f, 1.0f);
+        if (progress && (force || fraction - last_progress >= 0.01f || fraction >= 1.0f)) {
+            progress(fraction);
+            last_progress = fraction;
+        }
+    };
+    emit_progress(0.0f, true);
+
     // 解析用にチャンネルを平均化したモノラル信号を作成する
     SampleVec mono(total);
     const size_t num_ch = buf.channels.size();
+    const uint64_t progress_stride = std::max<uint64_t>(1, total / 100);
     for (uint64_t i = 0; i < total; ++i) {
         Sample sum = 0;
         for (const auto& ch : buf.channels) sum += ch[i];
         mono[i] = sum / static_cast<Sample>(num_ch);
+        if ((i + 1) % progress_stride == 0 || i + 1 == total) {
+            emit_progress(0.1f * static_cast<float>(i + 1) /
+                          static_cast<float>(total), false);
+        }
     }
 
     // 解析窓の大きさ: min_block_size を基本単位とする
@@ -92,15 +104,21 @@ std::vector<Segment> Segmenter::segment(const AudioBuffer& buf) const {
         uint64_t pos = seg_start + std::max<uint64_t>(cfg_.min_block_size, analysis_win);
 
         while (pos < total) {
+            emit_progress(0.1f + 0.9f * static_cast<float>(pos) /
+                          static_cast<float>(total), false);
             uint64_t cur_len = pos - seg_start;
             if (cur_len >= cfg_.max_block_size) break;
 
-            float ec  = compute_energy_change(mono, pos, analysis_win);
-            float sf  = compute_spectral_flux(mono, pos, analysis_win);
-            float zcr = compute_zero_crossing_rate(mono, pos, analysis_win);
-            float le  = compute_local_entropy(mono, pos, analysis_win);
+            const float ec = compute_energy_change(mono, pos, analysis_win);
+            const float zcr = compute_zero_crossing_rate(mono, pos, analysis_win);
 
-            if (is_boundary(ec, sf, zcr, le)) break;
+            // Entropy is not part of is_boundary(); do not calculate it for
+            // every candidate window. Also skip FFT spectral flux whenever
+            // energy or zero-crossing rate already guarantees a boundary.
+            if (ec > cfg_.energy_threshold || zcr > 0.2f) break;
+
+            const float sf = compute_spectral_flux(mono, pos, analysis_win);
+            if (sf > cfg_.spectral_flux_threshold) break;
 
             pos += analysis_win;
         }
@@ -117,8 +135,11 @@ std::vector<Segment> Segmenter::segment(const AudioBuffer& buf) const {
         segments.push_back(seg);
 
         seg_start += length64;
+        emit_progress(0.1f + 0.9f * static_cast<float>(seg_start) /
+                      static_cast<float>(total), false);
     }
 
+    emit_progress(1.0f, true);
     return segments;
 }
 
