@@ -82,9 +82,10 @@ Error Decoder::decode(const std::filesystem::path& input_path, AudioBuffer& out)
 
         report(impl_ ? impl_->progress : ProgressCallback{}, 0.0f, "header");
 
-        io::read_and_check_file_magic(r);
+        uint8_t file_minor = 0;
+        io::read_and_check_file_magic(r, &file_minor);
         AudioSpec spec = io::read_audio_spec(r);
-        io::DecodeFlags flags = io::read_decode_flags(r);
+        io::DecodeFlags flags = io::read_decode_flags(r, file_minor);
 
         const uint32_t num_channels = spec.num_channels;
         if (num_channels == 0) return Error::CorruptedData;
@@ -127,6 +128,8 @@ Error Decoder::decode(const std::filesystem::path& input_path, AudioBuffer& out)
             std::vector<SubbandMeta> subbands;
             analysis::HarmonicModel model;
             bool has_model = false;
+            uint8_t prediction_order = 0;
+            std::vector<Sample> prediction_seeds;
         };
         std::vector<std::vector<SegMeta>> meta(
             num_channels, std::vector<SegMeta>(num_segments));
@@ -161,9 +164,20 @@ Error Decoder::decode(const std::filesystem::path& input_path, AudioBuffer& out)
                         m.has_model = true;
                     }
                 }
-            }
-        }
 
+                if (file_minor >= 2) {
+                    m.prediction_order = r.read_byte();
+                    if (m.prediction_order > 4) {
+                        throw io::BitstreamError("invalid predictor order");
+                    }
+                    m.prediction_seeds.reserve(m.prediction_order);
+                    for (uint8_t i = 0; i < m.prediction_order; ++i) {
+                        m.prediction_seeds.push_back(
+                            detail::unzigzag_sample(r.read_uvarint()));
+                    }
+                }
+            }
+        
         // --- コンテキストグループ（確率テーブル + rANS復号）---
         report(impl_ ? impl_->progress : ProgressCallback{}, 0.3f, "entropy-decoding");
 
@@ -302,6 +316,14 @@ Error Decoder::decode(const std::filesystem::path& input_path, AudioBuffer& out)
                     wavelet_input = coeffs.subbands.empty() ? SampleVec{} : coeffs.subbands[0];
                 }
 
+                if (file_minor >= 2 && m.prediction_order > 0) {
+                    wavelet_input = detail::inverse_predictor(
+                        wavelet_input, m.prediction_order, m.prediction_seeds);
+                    if (wavelet_input.size() != segments[s].length) {
+                        return Error::CorruptedData;
+                    }
+                }
+
                 SampleVec samples;
                 auto ref_it = ref_map.find(static_cast<uint32_t>(s));
                 if (ref_it != ref_map.end()) {
@@ -326,6 +348,16 @@ Error Decoder::decode(const std::filesystem::path& input_path, AudioBuffer& out)
             report(impl_ ? impl_->progress : ProgressCallback{},
                    0.4f + 0.55f * static_cast<float>(c + 1) / static_cast<float>(num_channels),
                    "reconstruction");
+        }
+
+        // Mid/Sideから元のLeft/Rightへ完全可逆変換
+        if (flags.stereo_mid_side && num_channels == 2) {
+            for (uint64_t i = 0; i < spec.num_samples; ++i) {
+                const Sample mid = out.channels[0][i];
+                const Sample side = out.channels[1][i];
+                out.channels[0][i] = mid + detail::ceil_div2(side);
+                out.channels[1][i] = mid - detail::floor_div2(side);
+            }
         }
 
     } catch (const io::BitstreamError&) {
