@@ -35,9 +35,11 @@ def wav_payload(path):
                     raise ValueError("invalid WAVE_FORMAT_EXTENSIBLE")
                 valid_bits, channel_mask = struct.unpack_from("<HI", chunk, 18)
                 subformat = chunk[24:40]
-                if subformat[:4] == b"\\x01\\x00\\x00\\x00":
+                pcm_guid = bytes.fromhex("0100000000001000800000aa00389b71")
+                float_guid = bytes.fromhex("0300000000001000800000aa00389b71")
+                if subformat == pcm_guid:
                     tag = 1
-                elif subformat[:4] == b"\\x03\\x00\\x00\\x00":
+                elif subformat == float_guid:
                     tag = 3
             fmt = (tag, channels, rate, byte_rate, align, bits, valid_bits, channel_mask, subformat)
         elif chunk_id == b"data":
