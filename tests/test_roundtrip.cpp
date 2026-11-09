@@ -58,7 +58,7 @@ bool buffers_equal(const AudioBuffer& a, const AudioBuffer& b) {
     return true;
 }
 
-void run_roundtrip(const CodecConfig& cfg, const AudioBuffer& buf, const std::string& name) {
+uint64_t run_roundtrip(const CodecConfig& cfg, const AudioBuffer& buf, const std::string& name) {
     std::filesystem::path tmp = std::filesystem::temp_directory_path() / (name + ".ulacr");
 
     Encoder enc(cfg);
@@ -78,6 +78,7 @@ void run_roundtrip(const CodecConfig& cfg, const AudioBuffer& buf, const std::st
               << " bytes (" << (100.0 * static_cast<double>(comp_size) / static_cast<double>(orig_size)) << "%)\n";
 
     std::filesystem::remove(tmp);
+    return comp_size;
 }
 
 } // namespace
@@ -100,6 +101,27 @@ int main() {
             Sample base = static_cast<Sample>((i * 7u) % 20000u) - 10000;
             buf_correlated.channels[0][i] = base;
             buf_correlated.channels[1][i] = base - static_cast<Sample>(i % 7u);
+        }
+
+        // 新方式の圧縮率を同一音源で旧方式と比較。完全一致も双方で検証する。
+        {
+            CodecConfig baseline = CodecConfig::fast();
+            baseline.enable_block_graph = false;
+            baseline.enable_harmonic = false;
+            baseline.enable_predictive_coding = false;
+            baseline.enable_stereo_mid_side = false;
+
+            CodecConfig advanced = baseline;
+            advanced.enable_predictive_coding = true;
+            advanced.enable_stereo_mid_side = true;
+
+            const uint64_t baseline_size =
+                run_roundtrip(baseline, buf_correlated, "stereo_correlated_baseline");
+            const uint64_t advanced_size =
+                run_roundtrip(advanced, buf_correlated, "stereo_correlated_advanced");
+            ULACR_CHECK(advanced_size < baseline_size);
+            std::cout << "  [adaptive prediction + Mid/Side] "
+                      << baseline_size << " -> " << advanced_size << " bytes\n";
         }
 
         // --- 基本構成 (Wavelet + Residual Island + Bucket) ---
