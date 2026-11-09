@@ -44,6 +44,7 @@ jobs:
           '
           cp build-wasm/web-dist/ulacr.js dist/
           cp build-wasm/web-dist/ulacr.wasm dist/
+          node web/wasm/worker-smoke-test.mjs dist
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
