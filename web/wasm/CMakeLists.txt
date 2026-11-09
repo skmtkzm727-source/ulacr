@@ -10,7 +10,7 @@ target_link_options(ulacr-wasm PRIVATE
     "-sMODULARIZE=1"
     "-sEXPORT_ES6=1"
     "-sEXPORT_NAME=ULACRModule"
-    "-sENVIRONMENT=web"
+    "-sENVIRONMENT=web,worker"
     "-sALLOW_MEMORY_GROWTH=1"
     "-sFORCE_FILESYSTEM=1"
     "-sEXPORTED_FUNCTIONS=['_ulacr_encode','_ulacr_decode','_ulacr_output_ptr','_ulacr_output_size','_ulacr_clear_output','_malloc','_free']"
