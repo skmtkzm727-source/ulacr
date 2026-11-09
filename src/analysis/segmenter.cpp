@@ -75,7 +75,7 @@ std::vector<Segment> Segmenter::segment(
     float last_progress = -1.0f;
     auto emit_progress = [&](float fraction, bool force) {
         fraction = std::clamp(fraction, 0.0f, 1.0f);
-        if (progress && (force || fraction - last_progress >= 0.0025f || fraction >= 1.0f)) {
+        if (progress && (force || fraction - last_progress >= 0.01f || fraction >= 1.0f)) {
             progress(fraction);
             last_progress = fraction;
         }
@@ -99,17 +99,9 @@ std::vector<Segment> Segmenter::segment(
     // 解析窓の大きさ: min_block_size を基本単位とする
     const uint32_t analysis_win = std::max<uint32_t>(64, cfg_.min_block_size / 4);
 
-    // Spectral flux requires two FFTs and temporary allocations. Energy and
-    // zero-crossing checks still run at every analysis window; evaluate the
-    // more expensive spectral feature once every four windows to bound the
-    // segmentation cost on long audio while retaining sub-6 ms checks at 44.1 kHz.
-    constexpr uint32_t SPECTRAL_FLUX_INTERVAL = 4;
-
     uint64_t seg_start = 0;
     while (seg_start < total) {
-        const uint64_t first_candidate =
-            seg_start + std::max<uint64_t>(cfg_.min_block_size, analysis_win);
-        uint64_t pos = first_candidate;
+        uint64_t pos = seg_start + std::max<uint64_t>(cfg_.min_block_size, analysis_win);
 
         while (pos < total) {
             emit_progress(0.1f + 0.9f * static_cast<float>(pos) /
@@ -125,11 +117,8 @@ std::vector<Segment> Segmenter::segment(
             // energy or zero-crossing rate already guarantees a boundary.
             if (ec > cfg_.energy_threshold || zcr > 0.2f) break;
 
-            const uint64_t candidate_index = (pos - first_candidate) / analysis_win;
-            if (candidate_index % SPECTRAL_FLUX_INTERVAL == 0) {
-                const float sf = compute_spectral_flux(mono, pos, analysis_win);
-                if (sf > cfg_.spectral_flux_threshold) break;
-            }
+            const float sf = compute_spectral_flux(mono, pos, analysis_win);
+            if (sf > cfg_.spectral_flux_threshold) break;
 
             pos += analysis_win;
         }
