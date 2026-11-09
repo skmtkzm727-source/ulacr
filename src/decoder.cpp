@@ -124,6 +124,7 @@ Error Decoder::decode(const std::filesystem::path& input_path, AudioBuffer& out)
         struct SubbandMeta {
             uint32_t num_values = 0;
             uint32_t num_planes = 0;
+            std::vector<Sample> sparse_map;
         };
         struct SegMeta {
             uint32_t levels_done = 0;
@@ -148,6 +149,16 @@ Error Decoder::decode(const std::filesystem::path& input_path, AudioBuffer& out)
                     sb.num_planes = flags.enable_bitplane
                                         ? static_cast<uint32_t>(r.read_uvarint())
                                         : 0;
+                    if (file_minor >= 3) {
+                        const uint64_t map_count = r.read_uvarint();
+                        if (map_count > 32) throw io::BitstreamError("invalid sparse map size");
+                        sb.sparse_map.reserve(static_cast<size_t>(map_count));
+                        for (uint64_t j = 0; j < map_count; ++j)
+                            sb.sparse_map.push_back(detail::unzigzag_sample(r.read_uvarint()));
+                        if (!std::is_sorted(sb.sparse_map.begin(), sb.sparse_map.end()) ||
+                            std::adjacent_find(sb.sparse_map.begin(), sb.sparse_map.end()) != sb.sparse_map.end())
+                            throw io::BitstreamError("invalid sparse map ordering");
+                    }
                 }
 
                 if (flags.enable_harmonic) {
@@ -327,6 +338,14 @@ Error Decoder::decode(const std::filesystem::path& input_path, AudioBuffer& out)
                         }
                     }
 
+                    const auto& sparse_map = m.subbands[sb].sparse_map;
+                    if (!sparse_map.empty()) {
+                        for (Sample& index : island.values) {
+                            if (index < 0 || static_cast<uint64_t>(index) >= sparse_map.size())
+                                throw io::BitstreamError("sparse map index out of range");
+                            index = sparse_map[static_cast<size_t>(index)];
+                        }
+                    }
                     coeffs.subbands[sb] = coding::ResidualIslandCoder::decode(island);
                 }
 
