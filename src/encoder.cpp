@@ -239,9 +239,36 @@ Error Encoder::encode_file(const std::filesystem::path& input_path,
 Error Encoder::encode(const AudioBuffer& buf, const std::filesystem::path& output_path) {
     if (!buf.valid() || buf.spec.num_samples == 0) return Error::InvalidArg;
 
+    const bool integer_pcm_input = buf.spec.format == SampleFormat::Int16 ||
+                                   buf.spec.format == SampleFormat::Int24 ||
+                                   buf.spec.format == SampleFormat::Int32;
     // Auto compares complete serialized outputs; selection is based on actual
-    // file length, not an entropy estimate.
+    // file length, not an entropy estimate. Opaque float bit containers use
+    // only the bit-exact 0.3 path; do not route them through legacy arithmetic.
     if (impl_->cfg.profile == EncoderProfile::Auto) {
+        if (!integer_pcm_input) {
+            CodecConfig ultra_cfg = impl_->cfg;
+            ultra_cfg.profile = EncoderProfile::Ultra;
+            ultra_cfg.max_predictor_order = 16;
+            const auto nonce = std::chrono::steady_clock::now().time_since_epoch().count();
+            const std::filesystem::path ultra_tmp(
+                output_path.string() + ".auto-float-" + std::to_string(nonce));
+            Encoder ultra_encoder(ultra_cfg);
+            const Error ultra_err = ultra_encoder.encode(buf, ultra_tmp);
+            if (ultra_err != Error::OK) return ultra_err;
+            if (!encoded_file_is_exact(ultra_tmp, buf)) {
+                std::error_code ignored;
+                std::filesystem::remove(ultra_tmp, ignored);
+                return Error::CorruptedData;
+            }
+            std::error_code copy_error;
+            std::filesystem::copy_file(ultra_tmp, output_path,
+                std::filesystem::copy_options::overwrite_existing, copy_error);
+            std::error_code ignored;
+            std::filesystem::remove(ultra_tmp, ignored);
+            return copy_error ? Error::IOError : Error::OK;
+        }
+
         CodecConfig classic_cfg = impl_->cfg;
         classic_cfg.profile = EncoderProfile::Classic;
         classic_cfg.max_predictor_order = 4;
@@ -302,9 +329,6 @@ Error Encoder::encode(const AudioBuffer& buf, const std::filesystem::path& outpu
     }
 
     CodecConfig effective_cfg = impl_->cfg;
-    const bool integer_pcm = buf.spec.format == SampleFormat::Int16 ||
-                             buf.spec.format == SampleFormat::Int24 ||
-                             buf.spec.format == SampleFormat::Int32;
     // In v0.3 float samples are opaque bit patterns, not numeric integers.
     // Disable arithmetic transforms so every IEEE-754 bit is preserved.
     if (effective_cfg.profile == EncoderProfile::Ultra && !integer_pcm) {
@@ -314,6 +338,7 @@ Error Encoder::encode(const AudioBuffer& buf, const std::filesystem::path& outpu
         effective_cfg.enable_stereo_mid_side = false;
         effective_cfg.enable_wavelet = false;
     }
+    const bool integer_pcm = integer_pcm_input;
     const CodecConfig& cfg = effective_cfg;
     if (cfg.profile != EncoderProfile::Classic && cfg.profile != EncoderProfile::Ultra)
         return Error::UnsupportedFormat;
