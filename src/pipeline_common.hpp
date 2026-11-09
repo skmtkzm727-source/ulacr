@@ -48,6 +48,7 @@ inline uint32_t uvarint_size(uint64_t value) noexcept {
 struct PredictorResult {
     SampleVec residual;
     uint8_t order = 0;
+    bool reverse = false;
     std::vector<Sample> seeds;
     uint64_t estimated_bits = 0;
 };
