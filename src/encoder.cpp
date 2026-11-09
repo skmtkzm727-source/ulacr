@@ -709,6 +709,23 @@ Error Encoder::encode(const AudioBuffer& buf, const std::filesystem::path& outpu
     w.write_uvarint(groups.size());
     coding::RansEncoder rans_enc;
     coding::AdaptiveMixtureRangeEncoder mixture_range_enc;
+    uint64_t total_entropy_symbols = 0;
+    for (const auto& kv : groups) {
+        total_entropy_symbols += static_cast<uint64_t>(kv.second.size());
+    }
+    uint64_t completed_entropy_symbols = 0;
+    float last_entropy_progress = 0.75f;
+    auto report_entropy_progress = [&](float local_fraction, uint64_t group_size) {
+        if (!impl_->progress || total_entropy_symbols == 0) return;
+        const double completed = static_cast<double>(completed_entropy_symbols) +
+            static_cast<double>(group_size) * std::clamp(local_fraction, 0.0f, 1.0f);
+        const float overall = 0.75f + 0.20f * static_cast<float>(
+            completed / static_cast<double>(total_entropy_symbols));
+        if (overall - last_entropy_progress >= 0.002f || overall >= 0.95f) {
+            report(impl_->progress, overall, "entropy-coding");
+            last_entropy_progress = overall;
+        }
+    };
     for (const auto& kv : groups) {
         const coding::ContextKey&    key     = kv.first;
         const std::vector<uint32_t>& symbols = kv.second;
@@ -731,7 +748,12 @@ Error Encoder::encode(const AudioBuffer& buf, const std::filesystem::path& outpu
         if (cfg.profile == EncoderProfile::Ultra) {
             // Version 0.3: flag the multi-expert adaptive CDF in the high bit.
             w.write_uvarint(used_alphabet | 0x80000000u);
-            auto encoded = mixture_range_enc.encode(symbols, used_alphabet);
+            auto encoded = mixture_range_enc.encode(
+                symbols, used_alphabet,
+                [&](float fraction) {
+                    report_entropy_progress(fraction,
+                        static_cast<uint64_t>(symbols.size()));
+                });
             w.write_uvarint(encoded.size());
             w.write_bytes(encoded);
         } else {
@@ -741,7 +763,12 @@ Error Encoder::encode(const AudioBuffer& buf, const std::filesystem::path& outpu
             w.write_uvarint(encoded.size());
             w.write_bytes(encoded);
         }
+        completed_entropy_symbols += static_cast<uint64_t>(symbols.size());
+        if (cfg.profile == EncoderProfile::Classic) {
+            report_entropy_progress(1.0f, static_cast<uint64_t>(symbols.size()));
+        }
     }
+    report(impl_->progress, 0.95f, "entropy-coding");
 
     // --- 7. 生ビット列（仮数ビット）---
     auto raw_bytes = raw_bits.finish();
