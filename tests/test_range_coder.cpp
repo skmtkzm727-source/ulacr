@@ -1,4 +1,5 @@
 #include "ulacr/coding/range_coder.hpp"
+#include <algorithm>
 #include <cstdint>
 #include <iostream>
 #include <random>
@@ -14,7 +15,6 @@ int main() {
                 std::vector<uint32_t> source;
                 source.reserve(n);
                 for (uint32_t i = 0; i < n; ++i) {
-                    // A skewed distribution stresses adaptation and rescaling.
                     const uint32_t value = (rng() % 5u == 0u)
                         ? (rng() % alphabet) : (rng() % std::min<uint32_t>(alphabet, 2u));
                     source.push_back(value);
