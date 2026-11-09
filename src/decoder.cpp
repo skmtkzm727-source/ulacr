@@ -2,6 +2,7 @@
 #include "ulacr/io/wav_writer.hpp"
 #include "ulacr/io/ulacr_file.hpp"
 #include "ulacr/io/bitstream.hpp"
+#include "ulacr/io/checksum.hpp"
 #include "ulacr/analysis/harmonic_model.hpp"
 #include "ulacr/graph/block_graph.hpp"
 #include "ulacr/transform/wavelet.hpp"
@@ -62,6 +63,8 @@ Error Decoder::probe(const std::filesystem::path& input_path, AudioSpec& spec_ou
     if (!ok) return Error::IOError;
 
     try {
+        if (data.size() >= 6 && data[4] == ULACR_VERSION_MAJOR && data[5] == 3 &&
+            !io::verify_and_strip_crc32(data)) return Error::CorruptedData;
         io::BitReader r(data);
         io::read_and_check_file_magic(r);
         spec_out = io::read_audio_spec(r);
@@ -80,6 +83,8 @@ Error Decoder::decode(const std::filesystem::path& input_path, AudioBuffer& out)
     if (!ok) return Error::IOError;
 
     try {
+        if (data.size() >= 6 && data[4] == ULACR_VERSION_MAJOR && data[5] == 3 &&
+            !io::verify_and_strip_crc32(data)) return Error::CorruptedData;
         io::BitReader r(data);
 
         report(impl_ ? impl_->progress : ProgressCallback{}, 0.0f, "header");
