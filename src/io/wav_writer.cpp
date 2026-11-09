@@ -1,6 +1,7 @@
 #include "ulacr/io/wav_writer.hpp"
 #include <fstream>
 #include <cstring>
+#include <bit>
 #include <algorithm>
 
 namespace ulacr::io {
@@ -59,12 +60,12 @@ void encode_one_sample(Sample s, SampleFormat fmt, unsigned char* out) {
             break;
         }
         case SampleFormat::Float32: {
-            uint32_t bits = static_cast<uint32_t>(static_cast<int32_t>(s));
+            uint32_t bits = std::bit_cast<uint32_t>(static_cast<int32_t>(s));
             std::memcpy(out, &bits, 4);
             break;
         }
         case SampleFormat::Float64: {
-            uint64_t bits = static_cast<uint64_t>(s);
+            uint64_t bits = std::bit_cast<uint64_t>(s);
             std::memcpy(out, &bits, 8);
             break;
         }
