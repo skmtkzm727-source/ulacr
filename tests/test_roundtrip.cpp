@@ -134,6 +134,12 @@ int main() {
             ultra.max_predictor_order = 16;
             run_roundtrip(ultra, buf_correlated, "ultra_v03_integer");
 
+            AudioBuffer scaled = buf_correlated;
+            scaled.spec.format = SampleFormat::Int24;
+            for (auto& channel : scaled.channels)
+                for (Sample& value : channel) value *= 64;
+            run_roundtrip(ultra, scaled, "ultra_a1_common_factor");
+
             AudioBuffer f32;
             f32.spec.sample_rate = 48000;
             f32.spec.num_channels = 1;
