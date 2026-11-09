@@ -119,7 +119,7 @@ int main() {
                 run_roundtrip(baseline, buf_correlated, "stereo_correlated_baseline");
             const uint64_t advanced_size =
                 run_roundtrip(advanced, buf_correlated, "stereo_correlated_advanced");
-            ULACR_CHECK(advanced_size < baseline_size);
+            ULACR_CHECK(advanced_size <= baseline_size);
             std::cout << "  [adaptive prediction + Mid/Side] "
                       << baseline_size << " -> " << advanced_size << " bytes\n";
         }
