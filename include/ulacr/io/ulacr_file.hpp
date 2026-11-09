@@ -38,7 +38,7 @@ struct DecodeFlags {
 };
 
 /// マジックナンバー + バージョンを書き込む
-void write_file_magic(BitWriter& w);
+void write_file_magic(BitWriter& w, uint8_t file_minor = ULACR_VERSION_MINOR);
 
 /// マジックナンバー + バージョンを読み込み、検証する
 /// 失敗時は BitstreamError を投げる
