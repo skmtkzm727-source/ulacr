@@ -2,6 +2,7 @@
 #include "ulacr/core/types.hpp"
 #include "ulacr/core/codec_config.hpp"
 #include <vector>
+#include <functional>
 
 namespace ulacr {
 
@@ -30,7 +31,9 @@ public:
     explicit Segmenter(const CodecConfig& cfg) noexcept;
 
     /// AudioBuffer 全体をセグメント列に分割して返す
-    std::vector<Segment> segment(const AudioBuffer& buf) const;
+    std::vector<Segment> segment(
+        const AudioBuffer& buf,
+        const std::function<void(float)>& progress = {}) const;
 
 private:
     float compute_energy_change(const SampleVec& ch,
@@ -41,7 +44,6 @@ private:
                                      uint64_t pos, uint32_t win) const noexcept;
     float compute_local_entropy(const SampleVec& ch,
                                 uint64_t pos, uint32_t win) const noexcept;
-    bool  is_boundary(float ec, float sf, float zcr, float le) const noexcept;
 
     const CodecConfig& cfg_;
 };
