@@ -26,6 +26,105 @@ inline uint32_t bit_length_u64(uint64_t v) noexcept {
     return v == 0 ? 0u : (64u - static_cast<uint32_t>(std::countl_zero(v)));
 }
 
+inline uint64_t zigzag_u64(Sample value) noexcept {
+    return value >= 0
+        ? static_cast<uint64_t>(value) * 2u
+        : static_cast<uint64_t>(-(value + 1)) * 2u + 1u;
+}
+
+inline Sample unzigzag_sample(uint64_t value) noexcept {
+    if ((value & 1u) == 0) return static_cast<Sample>(value >> 1);
+    return -static_cast<Sample>((value >> 1) + 1u);
+}
+
+inline uint32_t uvarint_size(uint64_t value) noexcept {
+    uint32_t bytes = 1;
+    while (value >= 0x80u) { value >>= 7; ++bytes; }
+    return bytes;
+}
+
+struct PredictorResult {
+    SampleVec residual;
+    uint8_t order = 0;
+    std::vector<Sample> seeds;
+    uint64_t estimated_bits = 0;
+};
+
+inline Sample predict_from_history(std::span<const Sample> samples,
+                                   size_t index, uint8_t order) noexcept {
+    switch (order) {
+        case 1: return samples[index - 1];
+        case 2: return 2 * samples[index - 1] - samples[index - 2];
+        case 3: return 3 * samples[index - 1] - 3 * samples[index - 2] + samples[index - 3];
+        case 4: return 4 * samples[index - 1] - 6 * samples[index - 2]
+                      + 4 * samples[index - 3] - samples[index - 4];
+        default: return 0;
+    }
+}
+
+inline uint64_t estimate_residual_bits(std::span<const Sample> residual) noexcept {
+    uint64_t bits = 0;
+    for (Sample value : residual) {
+        const uint64_t zz = zigzag_u64(value);
+        if (zz != 0) bits += bit_length_u64(zz) + 1u;
+    }
+    return bits;
+}
+
+// FLAC型の固定予測器（次数0〜4）をブロックごとに比較。
+// 予測次数と先頭サンプルもコストに含め、悪化する場合は次数0を選ぶ。
+inline PredictorResult choose_predictor(std::span<const Sample> input,
+                                        bool enabled) {
+    PredictorResult best;
+    best.residual.assign(input.begin(), input.end());
+    best.estimated_bits = estimate_residual_bits(best.residual) + 8u;
+
+    if (!enabled || input.size() < 2) return best;
+
+    for (uint8_t order = 1; order <= 4 && order < input.size(); ++order) {
+        SampleVec residual(input.size(), 0);
+        std::vector<Sample> seeds(input.begin(), input.begin() + order);
+        for (size_t i = order; i < input.size(); ++i) {
+            residual[i] = input[i] - predict_from_history(input, i, order);
+        }
+
+        uint64_t cost = estimate_residual_bits(residual) + 8u;
+        for (Sample seed : seeds) cost += 8u * uvarint_size(zigzag_u64(seed));
+
+        if (cost < best.estimated_bits) {
+            best.residual = std::move(residual);
+            best.order = order;
+            best.seeds = std::move(seeds);
+            best.estimated_bits = cost;
+        }
+    }
+    return best;
+}
+
+inline SampleVec inverse_predictor(std::span<const Sample> residual,
+                                   uint8_t order,
+                                   std::span<const Sample> seeds) {
+    if (order == 0) return SampleVec(residual.begin(), residual.end());
+    if (order > 4 || seeds.size() != order || residual.size() < order) return {};
+
+    SampleVec output(residual.begin(), residual.end());
+    for (uint8_t i = 0; i < order; ++i) output[i] = seeds[i];
+    for (size_t i = order; i < output.size(); ++i) {
+        output[i] = residual[i] + predict_from_history(output, i, order);
+    }
+    return output;
+}
+
+inline Sample floor_div2(Sample value) noexcept {
+    Sample q = value / 2;
+    if (value < 0 && (value % 2) != 0) --q;
+    return q;
+}
+
+inline Sample ceil_div2(Sample value) noexcept {
+    return value > 0 ? (value + 1) / 2 : value / 2;
+}
+
 /// コンテキストキーを構築する。
 /// prev_residual_1 / dict_atom_idx / has_graph_ref は本パイプラインでは未使用 (常に0/false)。
 inline coding::ContextKey make_ctx(uint8_t channel, uint8_t subband_level,
