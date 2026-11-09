@@ -283,6 +283,7 @@ Error Encoder::encode(const AudioBuffer& buf, const std::filesystem::path& outpu
     struct SubbandMeta {
         uint32_t num_values = 0;
         uint32_t num_planes = 0;
+        std::vector<Sample> sparse_map;
     };
     struct SegMeta {
         uint32_t levels_done = 0;
@@ -389,6 +390,46 @@ Error Encoder::encode(const AudioBuffer& buf, const std::filesystem::path& outpu
 
                 // --- Residual Island Coding ---
                 auto island = coding::ResidualIslandCoder::encode(coeffs.subbands[sb]);
+
+                // A2: compact low-cardinality nonzero residual alphabets.
+                // Store an ordered reversible map only when its metadata plus
+                // mapped-symbol estimate is smaller than the original values.
+                if (cfg.profile == EncoderProfile::Ultra && integer_pcm &&
+                    island.values.size() >= 32) {
+                    std::vector<Sample> symbols = island.values;
+                    std::sort(symbols.begin(), symbols.end());
+                    symbols.erase(std::unique(symbols.begin(), symbols.end()), symbols.end());
+                    if (symbols.size() <= 32 && symbols.size() * 4 <= island.values.size()) {
+                        auto estimate_values = [&](const std::vector<Sample>& values) -> uint64_t {
+                            if (cfg.enable_bitplane) {
+                                const auto bp = coding::BitplaneDecomposer::decompose(values);
+                                uint64_t bits = 0;
+                                for (const auto& plane : bp.planes)
+                                    bits += estimate_binary_plane_bits(plane);
+                                return bits;
+                            }
+                            uint64_t bits = 0;
+                            for (Sample value : values) {
+                                const uint32_t bucket = detail::bit_length_u64(detail::zigzag_u64(value));
+                                bits += 5u + (bucket > 0 ? bucket - 1u : 0u);
+                            }
+                            return bits;
+                        };
+                        std::vector<Sample> mapped;
+                        mapped.reserve(island.values.size());
+                        for (Sample value : island.values) {
+                            const auto it = std::lower_bound(symbols.begin(), symbols.end(), value);
+                            mapped.push_back(static_cast<Sample>(it - symbols.begin()));
+                        }
+                        uint64_t map_bits = 8u * detail::uvarint_size(symbols.size());
+                        for (Sample value : symbols)
+                            map_bits += 8u * detail::uvarint_size(detail::zigzag_u64(value));
+                        if (estimate_values(mapped) + map_bits < estimate_values(island.values)) {
+                            island.values = std::move(mapped);
+                            meta[c][s].subbands[sb].sparse_map = std::move(symbols);
+                        }
+                    }
+                }
                 meta[c][s].subbands[sb].num_values = static_cast<uint32_t>(island.values.size());
 
                 // --- ゼロ連続長 (zero_runs) ---
@@ -481,6 +522,11 @@ Error Encoder::encode(const AudioBuffer& buf, const std::filesystem::path& outpu
             for (const auto& sb : sm.subbands) {
                 w.write_uvarint(sb.num_values);
                 if (cfg.enable_bitplane) w.write_uvarint(sb.num_planes);
+                if (cfg.profile == EncoderProfile::Ultra) {
+                    w.write_uvarint(sb.sparse_map.size());
+                    for (Sample value : sb.sparse_map)
+                        w.write_uvarint(detail::zigzag_u64(value));
+                }
             }
 
             if (cfg.enable_harmonic) {
