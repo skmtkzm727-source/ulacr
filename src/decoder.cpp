@@ -397,17 +397,18 @@ Error Decoder::decode(const std::filesystem::path& input_path, AudioBuffer& out)
 
                 if (file_minor >= 2 && m.prediction_order > 0) {
                     // The stored residual is already in the predictor's scan
-                    // direction. Invert the predictor first, then restore the
-                    // original sample order.
+                    // direction. Invert the predictor first.
                     wavelet_input = detail::inverse_predictor(
                         wavelet_input, m.prediction_order, m.prediction_seeds,
                         detail::nlms_normalization_shift(spec.format));
                     if (wavelet_input.size() != segments[s].length) {
                         return Error::CorruptedData;
                     }
-                    if (m.prediction_reverse)
-                        std::reverse(wavelet_input.begin(), wavelet_input.end());
                 }
+                // Reversing can also win with order-0 (identity) prediction,
+                // because the integer wavelet's boundary coefficients differ.
+                if (file_minor >= 3 && m.prediction_reverse)
+                    std::reverse(wavelet_input.begin(), wavelet_input.end());
 
                 SampleVec samples;
                 auto ref_it = ref_map.find(static_cast<uint32_t>(s));
