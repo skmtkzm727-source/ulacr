@@ -18,6 +18,7 @@
 #include <unordered_map>
 #include <algorithm>
 #include <cmath>
+#include <iostream>
 #include <chrono>
 #include <bit>
 #include <system_error>
@@ -438,6 +439,9 @@ Error Encoder::encode(const AudioBuffer& buf, const std::filesystem::path& outpu
             meta[c][s].prediction_order = prediction.order;
             meta[c][s].prediction_reverse = prediction.reverse;
             meta[c][s].prediction_seeds = std::move(prediction.seeds);
+            if (cfg.profile == EncoderProfile::Ultra && s < 2)
+                std::cerr << "ENC c=" << c << " s=" << s << " order=" << unsigned(prediction.order)
+                          << " rev=" << prediction.reverse << " seeds=" << meta[c][s].prediction_seeds.size() << "\\n";
             wavelet_input = std::move(prediction.residual);
 
             // --- ウェーブレット変換 ---
