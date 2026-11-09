@@ -1,4 +1,4 @@
-import createULACRModule from "./ulacr.js?v=ulacr-worker-20261109b";
+import createULACRModule from "./ulacr.js?v=ulacr-worker-20261109c";
 
 let codecPromise = null;
 let processing = false;
@@ -7,7 +7,7 @@ function getCodec() {
   if (!codecPromise) {
     codecPromise = createULACRModule({
       locateFile: function(path) {
-        return new URL(path + "?v=ulacr-worker-20261109b", import.meta.url).href;
+        return new URL(path + "?v=ulacr-worker-20261109c", import.meta.url).href;
       },
       print: function(message) {
         console.log("[ULAC-R]", message);
