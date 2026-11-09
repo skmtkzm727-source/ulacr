@@ -52,14 +52,17 @@ struct PredictorResult {
 
 inline Sample predict_from_history(std::span<const Sample> samples,
                                    size_t index, uint8_t order) noexcept {
-    switch (order) {
-        case 1: return samples[index - 1];
-        case 2: return 2 * samples[index - 1] - samples[index - 2];
-        case 3: return 3 * samples[index - 1] - 3 * samples[index - 2] + samples[index - 3];
-        case 4: return 4 * samples[index - 1] - 6 * samples[index - 2]
-                      + 4 * samples[index - 3] - samples[index - 4];
-        default: return 0;
+    if (order == 0 || order > 16 || index < order) return 0;
+    // Exact integer backward-difference predictor. For <=32-bit PCM and
+    // order<=16, the coefficient L1 norm is at most 2^16.
+    int64_t coefficient = 1;
+    int64_t prediction = 0;
+    for (uint8_t k = 1; k <= order; ++k) {
+        coefficient = coefficient * static_cast<int64_t>(order - k + 1) / k;
+        const int64_t term = coefficient * samples[index - k];
+        prediction += (k & 1u) ? term : -term;
     }
+    return prediction;
 }
 
 inline uint64_t estimate_residual_bits(std::span<const Sample> residual) noexcept {
@@ -74,14 +77,16 @@ inline uint64_t estimate_residual_bits(std::span<const Sample> residual) noexcep
 // FLAC型の固定予測器（次数0〜4）をブロックごとに比較。
 // 予測次数と先頭サンプルもコストに含め、悪化する場合は次数0を選ぶ。
 inline PredictorResult choose_predictor(std::span<const Sample> input,
-                                        bool enabled) {
+                                        bool enabled,
+                                        uint8_t max_order = 4) {
     PredictorResult best;
     best.residual.assign(input.begin(), input.end());
     best.estimated_bits = estimate_residual_bits(best.residual) + 8u;
 
     if (!enabled || input.size() < 2) return best;
 
-    for (uint8_t order = 1; order <= 4 && order < input.size(); ++order) {
+    max_order = std::min<uint8_t>(max_order, 16);
+    for (uint8_t order = 1; order <= max_order && order < input.size(); ++order) {
         SampleVec residual(input.size(), 0);
         std::vector<Sample> seeds(input.begin(), input.begin() + order);
         for (size_t i = order; i < input.size(); ++i) {
@@ -105,7 +110,7 @@ inline SampleVec inverse_predictor(std::span<const Sample> residual,
                                    uint8_t order,
                                    std::span<const Sample> seeds) {
     if (order == 0) return SampleVec(residual.begin(), residual.end());
-    if (order > 4 || seeds.size() != order || residual.size() < order) return {};
+    if (order > 16 || seeds.size() != order || residual.size() < order) return {};
 
     SampleVec output(residual.begin(), residual.end());
     for (uint8_t i = 0; i < order; ++i) output[i] = seeds[i];
