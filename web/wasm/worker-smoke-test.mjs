@@ -62,6 +62,35 @@ function makeWav() {
   return wav;
 }
 
+function makeStressWav() {
+  const sampleRate = 8000;
+  const frames = sampleRate * 20;
+  const pcm = Buffer.alloc(frames * 2);
+  for (let i = 0; i < frames; i++) {
+    // A high zero-crossing rate creates many minimum-size segments and
+    // exercises the block-graph index under a large candidate set.
+    const sample = Math.round(12000 * Math.sin(2 * Math.PI * 1800 * i / sampleRate));
+    pcm.writeInt16LE(sample, i * 2);
+  }
+
+  const wav = Buffer.alloc(44 + pcm.length);
+  wav.write("RIFF", 0);
+  wav.writeUInt32LE(36 + pcm.length, 4);
+  wav.write("WAVE", 8);
+  wav.write("fmt ", 12);
+  wav.writeUInt32LE(16, 16);
+  wav.writeUInt16LE(1, 20);
+  wav.writeUInt16LE(1, 22);
+  wav.writeUInt32LE(sampleRate, 24);
+  wav.writeUInt32LE(sampleRate * 2, 28);
+  wav.writeUInt16LE(2, 32);
+  wav.writeUInt16LE(16, 34);
+  wav.write("data", 36);
+  wav.writeUInt32LE(pcm.length, 40);
+  pcm.copy(wav, 44);
+  return wav;
+}
+
 async function invoke(id, mode, bytes) {
   messages.length = 0;
   const input = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
@@ -95,8 +124,26 @@ assert.ok(decoded.statuses.some(status => status.includes("復元しています
 assert.ok(decoded.progress.length > 0, "Decoder should emit progress events");
 assert.ok(decoded.progress.every(item => item.id === 3 && Number.isFinite(item.progress)));
 
+const stressInput = makeStressWav();
+const stressStart = Date.now();
+const stressEncoded = await invoke(4, "encode", new Uint8Array(stressInput));
+const stressElapsed = Date.now() - stressStart;
+assert.ok(!stressEncoded.error, stressEncoded.error?.message);
+assert.ok(stressEncoded.output?.length > 0);
+assert.ok(stressEncoded.progress.length > 0, "Block graph should report progress");
+const graphProgress = stressEncoded.progress.filter(item => item.phase === "block-graph");
+assert.ok(graphProgress.length > 0, "Block graph stage progress must be emitted");
+assert.ok(graphProgress.some(item => item.progress >= 0.99), "Block graph must complete");
+assert.ok(stressElapsed < 20000,
+  "20-second high-crossing audio must not stall block-graph analysis (" + stressElapsed + " ms)");
+
 console.log(
   "ULAC-R worker smoke test passed:",
   original.length, "bytes ->", encoded.output.length,
   "bytes ->", decoded.output.length, "bytes; roundtrip exact"
+);
+console.log(
+  "Block-graph stress test passed:",
+  stressInput.length, "bytes in", stressElapsed, "ms;",
+  graphProgress.length, "progress updates"
 );
