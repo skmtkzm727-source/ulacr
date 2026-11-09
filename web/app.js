@@ -118,25 +118,48 @@ async function getCodec() {
     codecPromise = (async function() {
       setStatus("音声エンジンのファイルを取得しています…", true);
 
-      // SafariでのWASMストリーミング取得に依存せず、先にバイナリを取得してから初期化する。
       const wasmUrl = new URL("./ulacr.wasm", import.meta.url);
       const response = await fetch(wasmUrl.href, { cache: "no-store" });
       if (!response.ok) {
-        throw new Error("WASMファイルを取得できません（HTTP " + response.status + "）。ページを再読み込みしてください。");
+        throw new Error("WASMファイルを取得できません（HTTP " + response.status + "）。");
       }
 
-      const wasmBinary = await response.arrayBuffer();
-      if (wasmBinary.byteLength < 8) {
-        throw new Error("WASMファイルが空、または不完全です。GitHub Pagesの公開状態を確認してください。");
+      const wasmBytes = await response.arrayBuffer();
+      if (wasmBytes.byteLength < 8 || !WebAssembly.validate(wasmBytes)) {
+        throw new Error("WASMファイルの検証に失敗しました。公開ファイルが壊れている可能性があります。");
       }
 
-      setStatus("音声エンジンを初期化しています…", true);
-      return await createULACRModule({
-        wasmBinary: wasmBinary,
-        onAbort: function(reason) {
-          console.error("ULAC-R WebAssembly aborted:", reason);
-        }
-      });
+      setStatus("WebAssemblyをコンパイルしています…", true);
+      const compiledModule = await WebAssembly.compile(wasmBytes);
+
+      setStatus("音声エンジンを起動しています…", true);
+      let initialized = false;
+      const module = await Promise.race([
+        createULACRModule({
+          // Emscripten側の自動fetch/streamingを使わず、Safariでも同じ手順で同期instantiateする。
+          instantiateWasm: function(imports, receiveInstance) {
+            try {
+              const instance = new WebAssembly.Instance(compiledModule, imports);
+              initialized = true;
+              receiveInstance(instance, compiledModule);
+              return instance.exports;
+            } catch (error) {
+              console.error("WASM instantiate failed:", error);
+              throw error;
+            }
+          }
+        }),
+        new Promise(function(_, reject) {
+          setTimeout(function() {
+            if (!initialized) reject(new Error("WebAssemblyの起動が20秒以内に完了しませんでした。Safariを再読み込みして再試行してください。"));
+          }, 20000);
+        })
+      ]);
+
+      if (!module || typeof module._ulacr_encode !== "function" || typeof module._ulacr_decode !== "function") {
+        throw new Error("音声エンジンの初期化後に必要な関数が見つかりません。");
+      }
+      return module;
     })().catch(function(error) {
       codecPromise = null;
       console.error("ULAC-R engine initialization failed:", error);
