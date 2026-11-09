@@ -34,6 +34,7 @@ struct DecodeFlags {
     bool     enable_harmonic     = false;
     bool     enable_bitplane     = false;
     uint8_t  max_harmonics       = 0;
+    bool     stereo_mid_side     = false;
 };
 
 /// マジックナンバー + バージョンを書き込む
@@ -41,7 +42,7 @@ void write_file_magic(BitWriter& w);
 
 /// マジックナンバー + バージョンを読み込み、検証する
 /// 失敗時は BitstreamError を投げる
-void read_and_check_file_magic(BitReader& r);
+void read_and_check_file_magic(BitReader& r, uint8_t* minor_out = nullptr);
 
 /// AudioSpec を書き込む
 void write_audio_spec(BitWriter& w, const AudioSpec& spec);
@@ -53,6 +54,6 @@ AudioSpec read_audio_spec(BitReader& r);
 void write_decode_flags(BitWriter& w, const DecodeFlags& flags);
 
 /// デコードフラグを読み込む
-DecodeFlags read_decode_flags(BitReader& r);
+DecodeFlags read_decode_flags(BitReader& r, uint8_t file_minor = ULACR_VERSION_MINOR);
 
 } // namespace ulacr::io
