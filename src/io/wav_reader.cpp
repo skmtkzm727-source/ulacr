@@ -1,6 +1,7 @@
 #include "ulacr/io/wav_reader.hpp"
 #include <fstream>
 #include <cstring>
+#include <bit>
 #include <array>
 
 namespace ulacr::io {
@@ -86,12 +87,12 @@ Sample decode_one_sample(const unsigned char* p, SampleFormat fmt) {
         case SampleFormat::Float32: {
             uint32_t bits;
             std::memcpy(&bits, p, 4);
-            return static_cast<Sample>(static_cast<int32_t>(bits));
+            return static_cast<Sample>(std::bit_cast<int32_t>(bits));
         }
         case SampleFormat::Float64: {
             uint64_t bits;
             std::memcpy(&bits, p, 8);
-            return static_cast<Sample>(static_cast<int64_t>(bits));
+            return std::bit_cast<Sample>(bits);
         }
     }
     return 0;
