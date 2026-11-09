@@ -331,7 +331,7 @@ Error Encoder::encode(const AudioBuffer& buf, const std::filesystem::path& outpu
     CodecConfig effective_cfg = impl_->cfg;
     // In v0.3 float samples are opaque bit patterns, not numeric integers.
     // Disable arithmetic transforms so every IEEE-754 bit is preserved.
-    if (effective_cfg.profile == EncoderProfile::Ultra && !integer_pcm) {
+    if (effective_cfg.profile == EncoderProfile::Ultra && !integer_pcm_input) {
         effective_cfg.enable_block_graph = false;
         effective_cfg.enable_harmonic = false;
         effective_cfg.enable_predictive_coding = false;
