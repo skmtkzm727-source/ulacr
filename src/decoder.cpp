@@ -181,12 +181,13 @@ Error Decoder::decode(const std::filesystem::path& input_path, AudioBuffer& out)
 
                 if (file_minor >= 2) {
                     m.prediction_order = r.read_byte();
-                    const uint8_t max_predictor_order = file_minor >= 3 ? 16 : 4;
+                    const uint8_t max_predictor_order = file_minor >= 3 ? 17 : 4;
                     if (m.prediction_order > max_predictor_order) {
                         throw io::BitstreamError("invalid predictor order");
                     }
-                    m.prediction_seeds.reserve(m.prediction_order);
-                    for (uint8_t i = 0; i < m.prediction_order; ++i) {
+                    const uint8_t seed_count = m.prediction_order == 17 ? 4 : m.prediction_order;
+                    m.prediction_seeds.reserve(seed_count);
+                    for (uint8_t i = 0; i < seed_count; ++i) {
                         m.prediction_seeds.push_back(
                             detail::unzigzag_sample(r.read_uvarint()));
                     }
@@ -371,7 +372,8 @@ Error Decoder::decode(const std::filesystem::path& input_path, AudioBuffer& out)
 
                 if (file_minor >= 2 && m.prediction_order > 0) {
                     wavelet_input = detail::inverse_predictor(
-                        wavelet_input, m.prediction_order, m.prediction_seeds);
+                        wavelet_input, m.prediction_order, m.prediction_seeds,
+                        detail::nlms_normalization_shift(spec.format));
                     if (wavelet_input.size() != segments[s].length) {
                         return Error::CorruptedData;
                     }
