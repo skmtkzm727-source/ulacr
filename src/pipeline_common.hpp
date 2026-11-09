@@ -2,6 +2,7 @@
 #include "ulacr/core/types.hpp"
 #include "ulacr/coding/context_model.hpp"
 #include <vector>
+#include <array>
 #include <bit>
 #include <algorithm>
 
@@ -107,10 +108,93 @@ inline PredictorResult choose_predictor(std::span<const Sample> input,
     return best;
 }
 
+// Four-tap fixed-point NLMS. Encoder and decoder update weights from
+// exactly reconstructed samples, so no floating-point state is transmitted.
+inline uint8_t nlms_normalization_shift(SampleFormat format) noexcept {
+    switch (format) {
+        case SampleFormat::Int24: return 8;
+        case SampleFormat::Int32: return 16;
+        default: return 0;
+    }
+}
+
+using NlmsWeights = std::array<int64_t, 4>;
+
+inline Sample adaptive_nlms_predict(const NlmsWeights& weights,
+                                    std::span<const Sample> history,
+                                    size_t index,
+                                    uint8_t normalization_shift) noexcept {
+    const Sample scale = Sample{1} << normalization_shift;
+    int64_t dot = 0;
+    for (size_t tap = 0; tap < weights.size(); ++tap) {
+        const Sample x = history[index - 1 - tap] / scale;
+        dot += weights[tap] * x;
+    }
+    return (dot / 65536) * scale;
+}
+
+inline void adaptive_nlms_update(NlmsWeights& weights,
+                                 std::span<const Sample> history,
+                                 size_t index,
+                                 Sample error,
+                                 uint8_t normalization_shift) noexcept {
+    const Sample scale = Sample{1} << normalization_shift;
+    const Sample error_norm = error / scale;
+    int64_t energy = 1 << 16;
+    std::array<Sample, 4> normalized{};
+    for (size_t tap = 0; tap < weights.size(); ++tap) {
+        normalized[tap] = history[index - 1 - tap] / scale;
+        energy += normalized[tap] * normalized[tap];
+    }
+    constexpr int64_t step_q16 = 16384; // mu = 0.25
+    constexpr int64_t weight_limit = 8 * 65536;
+    for (size_t tap = 0; tap < weights.size(); ++tap) {
+        const int64_t delta = (step_q16 * error_norm * normalized[tap]) / energy;
+        weights[tap] = std::clamp(weights[tap] + delta, -weight_limit, weight_limit);
+    }
+}
+
+inline PredictorResult make_adaptive_nlms_prediction(
+        std::span<const Sample> input, uint8_t normalization_shift) {
+    PredictorResult result;
+    result.residual.assign(input.size(), 0);
+    if (input.size() < 4) {
+        result.residual.assign(input.begin(), input.end());
+        return result;
+    }
+    result.order = 17; // v0.3 mode tag; four initial history samples follow.
+    result.seeds.assign(input.begin(), input.begin() + 4);
+    NlmsWeights weights{};
+    for (size_t i = 4; i < input.size(); ++i) {
+        const Sample prediction = adaptive_nlms_predict(weights, input, i, normalization_shift);
+        const Sample error = input[i] - prediction;
+        result.residual[i] = error;
+        adaptive_nlms_update(weights, input, i, error, normalization_shift);
+    }
+    return result;
+}
+
+inline SampleVec inverse_adaptive_nlms(std::span<const Sample> residual,
+                                       std::span<const Sample> seeds,
+                                       uint8_t normalization_shift) {
+    if (seeds.size() != 4 || residual.size() < 4) return {};
+    SampleVec output(residual.begin(), residual.end());
+    std::copy(seeds.begin(), seeds.end(), output.begin());
+    NlmsWeights weights{};
+    for (size_t i = 4; i < output.size(); ++i) {
+        const Sample prediction = adaptive_nlms_predict(weights, output, i, normalization_shift);
+        output[i] = residual[i] + prediction;
+        adaptive_nlms_update(weights, output, i, residual[i], normalization_shift);
+    }
+    return output;
+}
+
 inline SampleVec inverse_predictor(std::span<const Sample> residual,
                                    uint8_t order,
-                                   std::span<const Sample> seeds) {
+                                   std::span<const Sample> seeds,
+                                   uint8_t normalization_shift = 0) {
     if (order == 0) return SampleVec(residual.begin(), residual.end());
+    if (order == 17) return inverse_adaptive_nlms(residual, seeds, normalization_shift);
     if (order > 16 || seeds.size() != order || residual.size() < order) return {};
 
     SampleVec output(residual.begin(), residual.end());
