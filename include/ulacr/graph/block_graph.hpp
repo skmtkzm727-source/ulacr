@@ -5,6 +5,7 @@
 #include <vector>
 #include <unordered_map>
 #include <optional>
+#include <functional>
 
 namespace ulacr {
 
@@ -48,7 +49,8 @@ public:
 
     /// セグメント列からグラフを構築
     BlockGraph build(const AudioBuffer&           buf,
-                     const std::vector<Segment>&   segs) const;
+                     const std::vector<Segment>&   segs,
+                     const std::function<void(float)>& progress = {}) const;
 
     /// block_id に対応する参照ブロックを返す（存在しなければ nullopt）
     std::optional<uint32_t> find_reference(const BlockGraph& g,
@@ -58,11 +60,6 @@ private:
     BlockFeature extract_feature(const AudioBuffer&  buf,
                                  const Segment&      seg,
                                  uint32_t            id) const;
-
-    /// Locality Sensitive Hashing による候補探索
-    std::vector<uint32_t> lsh_candidates(
-            const std::vector<BlockFeature>& nodes,
-            const BlockFeature&              query) const;
 
     const CodecConfig& cfg_;
 };
