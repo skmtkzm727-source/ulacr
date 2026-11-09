@@ -34,7 +34,8 @@ inline uint64_t zigzag_u64(Sample value) noexcept {
 
 inline Sample unzigzag_sample(uint64_t value) noexcept {
     if ((value & 1u) == 0) return static_cast<Sample>(value >> 1);
-    return -static_cast<Sample>((value >> 1) + 1u);
+    // Complement is the exact two's-complement inverse, including INT64_MIN.
+    return std::bit_cast<Sample>(~(value >> 1));
 }
 
 inline uint32_t uvarint_size(uint64_t value) noexcept {
