@@ -26,6 +26,12 @@ struct CodecConfig {
     uint32_t dict_atom_size    = 256;   // 辞書原子のサイズ（周波数ビン数）
     uint32_t ksvd_iterations   = 20;
 
+    // --- Adaptive integer prediction ---
+    bool     enable_predictive_coding = true; // ブロックごとに差分予測次数 0〜4 を選択
+
+    // --- Stereo decorrelation ---
+    bool     enable_stereo_mid_side = true; // 整数PCMステレオを可逆Mid/Side変換
+
     // --- Wavelet ---
     bool     enable_wavelet    = true;
     uint32_t wavelet_levels    = 6;     // ウェーブレット分解段数
