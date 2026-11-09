@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+#include <functional>
 #include <span>
 #include <vector>
 
@@ -25,8 +26,10 @@ public:
 // Weights are Bayesian-updated using integer likelihoods.
 class AdaptiveMixtureRangeEncoder {
 public:
-    std::vector<uint8_t> encode(std::span<const uint32_t> symbols,
-                                uint32_t alphabet_size) const;
+    std::vector<uint8_t> encode(
+        std::span<const uint32_t> symbols,
+        uint32_t alphabet_size,
+        const std::function<void(float)>& progress = {}) const;
 };
 
 class AdaptiveMixtureRangeDecoder {
