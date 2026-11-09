@@ -12,7 +12,7 @@ namespace ulacr {
 // バージョン
 // ---------------------------------------------------------------
 inline constexpr uint32_t ULACR_VERSION_MAJOR = 0;
-inline constexpr uint32_t ULACR_VERSION_MINOR = 1;
+inline constexpr uint32_t ULACR_VERSION_MINOR = 2;
 inline constexpr uint32_t ULACR_MAGIC = 0x554C4352; // 'ULCR'
 
 // ---------------------------------------------------------------
