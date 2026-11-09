@@ -10,6 +10,7 @@
 #include "ulacr/coding/bitplane.hpp"
 #include "ulacr/coding/context_model.hpp"
 #include "ulacr/coding/rans_coder.hpp"
+#include "ulacr/coding/range_coder.hpp"
 #include "pipeline_common.hpp"
 
 #include <fstream>
@@ -477,6 +478,7 @@ Error Encoder::encode(const AudioBuffer& buf, const std::filesystem::path& outpu
     // --- 6. コンテキストグループ（確率テーブル + rANS符号化データ）---
     w.write_uvarint(groups.size());
     coding::RansEncoder rans_enc;
+    coding::AdaptiveRangeEncoder range_enc;
     for (const auto& kv : groups) {
         const coding::ContextKey&    key     = kv.first;
         const std::vector<uint32_t>& symbols = kv.second;
@@ -496,13 +498,18 @@ Error Encoder::encode(const AudioBuffer& buf, const std::filesystem::path& outpu
         for (uint32_t sym : symbols) counts[sym]++;
 
         w.write_uvarint(used_alphabet);
-        for (uint32_t cnt : counts) w.write_uvarint(cnt);
-
-        auto table   = coding::build_prob_table(counts, used_alphabet);
-        auto encoded = rans_enc.encode(symbols, table);
-
-        w.write_uvarint(encoded.size());
-        w.write_bytes(encoded);
+        if (cfg.profile == EncoderProfile::Ultra) {
+            // Version 0.3: deterministic adaptive CDF, reset for each context group.
+            auto encoded = range_enc.encode(symbols, used_alphabet);
+            w.write_uvarint(encoded.size());
+            w.write_bytes(encoded);
+        } else {
+            for (uint32_t cnt : counts) w.write_uvarint(cnt);
+            auto table = coding::build_prob_table(counts, used_alphabet);
+            auto encoded = rans_enc.encode(symbols, table);
+            w.write_uvarint(encoded.size());
+            w.write_bytes(encoded);
+        }
     }
 
     // --- 7. 生ビット列（仮数ビット）---
