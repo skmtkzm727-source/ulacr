@@ -140,6 +140,21 @@ int main() {
                 for (Sample& value : channel) value *= 64;
             run_roundtrip(ultra, scaled, "ultra_a1_common_factor");
 
+            AudioBuffer sparse;
+            sparse.spec.sample_rate = 48000;
+            sparse.spec.num_channels = 1;
+            sparse.spec.num_samples = 12000;
+            sparse.spec.format = SampleFormat::Int24;
+            sparse.channels.assign(1, SampleVec(sparse.spec.num_samples));
+            for (uint64_t i = 0; i < sparse.spec.num_samples; ++i) {
+                const Sample level = static_cast<Sample>((i / 37u) % 5u) - 2;
+                sparse.channels[0][i] = level * 257;
+            }
+            CodecConfig sparse_cfg = ultra;
+            sparse_cfg.enable_wavelet = false;
+            sparse_cfg.enable_bitplane = true;
+            run_roundtrip(sparse_cfg, sparse, "ultra_a2_sparse_alphabet");
+
             AudioBuffer f32;
             f32.spec.sample_rate = 48000;
             f32.spec.num_channels = 1;
