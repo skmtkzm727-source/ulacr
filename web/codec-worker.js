@@ -71,6 +71,7 @@ self.addEventListener("message", async function(event) {
     if (!inputPtr) throw new Error("ブラウザのメモリを確保できませんでした。短い音声ファイルでお試しください。");
 
     module.HEAPU8.set(inputBytes, inputPtr);
+    self.__ulacr_active_request_id = id;
     const code = mode === "encode"
       ? module._ulacr_encode(inputPtr, inputBytes.byteLength)
       : module._ulacr_decode(inputPtr, inputBytes.byteLength);
@@ -108,6 +109,7 @@ self.addEventListener("message", async function(event) {
         try { module._free(inputPtr); } catch (_) {}
       }
     }
+    delete self.__ulacr_active_request_id;
     processing = false;
   }
 });
