@@ -433,7 +433,7 @@ Error Encoder::encode(const AudioBuffer& buf, const std::filesystem::path& outpu
             // 既存のモデル差分/グラフ差分に重ねて、次数0〜4の固定予測器を
             // 実測コストで比較する。予測が不利なら次数0（恒等変換）を選ぶ。
             const uint8_t max_order = cfg.profile == EncoderProfile::Ultra
-                ? std::max<uint8_t>(cfg.max_predictor_order, 16)
+                ? std::min<uint8_t>(cfg.max_predictor_order, 16)
                 : std::min<uint8_t>(cfg.max_predictor_order, 4);
             auto prediction = choose_predictor_by_payload_cost(
                 wavelet_input, wavelet, cfg, cfg.enable_predictive_coding && integer_pcm, max_order,
