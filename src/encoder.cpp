@@ -42,6 +42,107 @@ void report(const ProgressCallback& cb, float p, std::string_view phase) {
     if (cb) cb(p, phase);
 }
 
+uint64_t estimate_binary_plane_bits(const std::vector<uint8_t>& plane) {
+    if (plane.empty()) return 0;
+    uint64_t ones = 0;
+    for (uint8_t bit : plane) ones += bit != 0;
+    const uint64_t zeros = plane.size() - ones;
+    auto entropy = [](uint64_t count, uint64_t total) -> double {
+        if (count == 0) return 0.0;
+        const double p = static_cast<double>(count) / static_cast<double>(total);
+        return -static_cast<double>(count) * std::log2(p);
+    };
+    return static_cast<uint64_t>(std::ceil(entropy(ones, plane.size()) +
+                                           entropy(zeros, plane.size()))) + 16u;
+}
+
+uint64_t estimate_wavelet_payload_bits(std::span<const Sample> input,
+                                       const WaveletTransform& wavelet,
+                                       const CodecConfig& cfg) {
+    WaveletCoeffs coeffs;
+    if (cfg.enable_wavelet) {
+        coeffs = wavelet.forward(input);
+    } else {
+        coeffs.levels = 0;
+        coeffs.subbands.emplace_back(input.begin(), input.end());
+    }
+
+    uint64_t bits = 0;
+    for (const auto& subband : coeffs.subbands) {
+        const auto island = coding::ResidualIslandCoder::encode(subband);
+        // Zero-run symbols use a bucket in rANS and lower bits in the raw stream.
+        bits += 8u * 4u; // conservative per-subband metadata/table allowance
+        for (uint32_t run : island.zero_runs) {
+            const uint32_t bucket = detail::bit_length_u64(run);
+            bits += 5u + (bucket > 0 ? bucket - 1u : 0u);
+        }
+
+        if (cfg.enable_bitplane) {
+            const auto bp = coding::BitplaneDecomposer::decompose(island.values);
+            for (const auto& plane : bp.planes) {
+                bits += estimate_binary_plane_bits(plane);
+            }
+        } else {
+            for (Sample value : island.values) {
+                const uint64_t zz = detail::zigzag_u64(value);
+                const uint32_t bucket = detail::bit_length_u64(zz);
+                bits += 5u + (bucket > 0 ? bucket - 1u : 0u);
+            }
+        }
+    }
+    return bits;
+}
+
+detail::PredictorResult choose_predictor_by_payload_cost(
+        std::span<const Sample> input,
+        const WaveletTransform& wavelet,
+        const CodecConfig& cfg,
+        bool enabled) {
+    detail::PredictorResult best;
+    best.residual.assign(input.begin(), input.end());
+    best.estimated_bits = estimate_wavelet_payload_bits(best.residual, wavelet, cfg) + 8u;
+    if (!enabled || input.size() < 2) return best;
+
+    for (uint8_t order = 1; order <= 4 && order < input.size(); ++order) {
+        SampleVec residual(input.size(), 0);
+        std::vector<Sample> seeds(input.begin(), input.begin() + order);
+        for (size_t i = order; i < input.size(); ++i) {
+            residual[i] = input[i] - detail::predict_from_history(input, i, order);
+        }
+        uint64_t cost = estimate_wavelet_payload_bits(residual, wavelet, cfg) + 8u;
+        for (Sample seed : seeds) {
+            cost += 8u * detail::uvarint_size(detail::zigzag_u64(seed));
+        }
+        if (cost < best.estimated_bits) {
+            best.residual = std::move(residual);
+            best.order = order;
+            best.seeds = std::move(seeds);
+            best.estimated_bits = cost;
+        }
+    }
+    return best;
+}
+
+uint64_t estimate_audio_cost(const AudioBuffer& audio,
+                             const std::vector<Segment>& segments,
+                             const CodecConfig& cfg) {
+    const bool integer_pcm = audio.spec.format == SampleFormat::Int16 ||
+                             audio.spec.format == SampleFormat::Int24 ||
+                             audio.spec.format == SampleFormat::Int32;
+    WaveletTransform wavelet(cfg);
+    uint64_t total_bits = 0;
+    for (const auto& channel : audio.channels) {
+        for (const Segment& segment : segments) {
+            const std::span<const Sample> samples(
+                channel.data() + segment.offset, segment.length);
+            const auto predictor = choose_predictor_by_payload_cost(
+                samples, wavelet, cfg, cfg.enable_predictive_coding && integer_pcm);
+            total_bits += predictor.estimated_bits;
+        }
+    }
+    return total_bits;
+}
+
 } // namespace
 
 // ---------------------------------------------------------------
@@ -67,23 +168,33 @@ Error Encoder::encode(const AudioBuffer& buf, const std::filesystem::path& outpu
                              buf.spec.format == SampleFormat::Int24 ||
                              buf.spec.format == SampleFormat::Int32;
     AudioBuffer coding_buf = buf;
-    const bool use_mid_side = cfg.enable_stereo_mid_side && integer_pcm && num_channels == 2;
-    if (use_mid_side) {
-        for (uint64_t i = 0; i < buf.spec.num_samples; ++i) {
-            const Sample left = buf.channels[0][i];
-            const Sample right = buf.channels[1][i];
-            const Sample side = left - right;
-            const Sample mid = right + detail::floor_div2(side);
-            coding_buf.channels[0][i] = mid;
-            coding_buf.channels[1][i] = side;
-        }
-    }
+    bool use_mid_side = false;
 
     // --- 1. 適応的セグメンテーション ---
     report(impl_->progress, 0.0f, "segmentation");
     Segmenter segmenter(cfg);
     std::vector<Segment> segments = segmenter.segment(buf);
     if (segments.empty()) return Error::InvalidArg;
+
+    // M/S変換は常時適用しない。変換前後の実際のウェーブレット＋
+    // Residual-Island/entropy近似コストを比較し、小さくなる場合だけ採用する。
+    if (cfg.enable_stereo_mid_side && integer_pcm && num_channels == 2) {
+        AudioBuffer candidate = buf;
+        for (uint64_t i = 0; i < buf.spec.num_samples; ++i) {
+            const Sample left = buf.channels[0][i];
+            const Sample right = buf.channels[1][i];
+            const Sample side = left - right;
+            const Sample mid = right + detail::floor_div2(side);
+            candidate.channels[0][i] = mid;
+            candidate.channels[1][i] = side;
+        }
+        const uint64_t lr_cost = estimate_audio_cost(buf, segments, cfg);
+        const uint64_t ms_cost = estimate_audio_cost(candidate, segments, cfg);
+        if (ms_cost < lr_cost) {
+            coding_buf = std::move(candidate);
+            use_mid_side = true;
+        }
+    }
 
     // --- 2. Block Graph Compression ---
     report(impl_->progress, 0.05f, "block-graph");
@@ -166,8 +277,8 @@ Error Encoder::encode(const AudioBuffer& buf, const std::filesystem::path& outpu
             // --- 適応整数予測 ---
             // 既存のモデル差分/グラフ差分に重ねて、次数0〜4の固定予測器を
             // 実測コストで比較する。予測が不利なら次数0（恒等変換）を選ぶ。
-            auto prediction = detail::choose_predictor(
-                wavelet_input, cfg.enable_predictive_coding && integer_pcm);
+            auto prediction = choose_predictor_by_payload_cost(
+                wavelet_input, wavelet, cfg, cfg.enable_predictive_coding && integer_pcm);
             meta[c][s].prediction_order = prediction.order;
             meta[c][s].prediction_seeds = std::move(prediction.seeds);
             wavelet_input = std::move(prediction.residual);
