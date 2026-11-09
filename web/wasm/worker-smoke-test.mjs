@@ -71,7 +71,8 @@ async function invoke(id, mode, bytes) {
   return {
     error,
     output: result ? Buffer.from(result.output) : null,
-    statuses: messages.filter(message => message.type === "status").map(message => message.message)
+    statuses: messages.filter(message => message.type === "status").map(message => message.message),
+    progress: messages.filter(message => message.type === "progress")
   };
 }
 
@@ -84,11 +85,15 @@ assert.ok(!encoded.error, encoded.error?.message);
 assert.ok(encoded.output?.length > 0, "Encoding should return bytes");
 assert.ok(encoded.statuses.some(status => status.includes("読み込んでいます")));
 assert.ok(encoded.statuses.some(status => status.includes("圧縮しています")));
+assert.ok(encoded.progress.length > 0, "Encoder should emit progress events");
+assert.ok(encoded.progress.every(item => item.id === 2 && Number.isFinite(item.progress)));
 
 const decoded = await invoke(3, "decode", new Uint8Array(encoded.output));
 assert.ok(!decoded.error, decoded.error?.message);
 assert.deepEqual(decoded.output, original, "Decoded WAV must match input byte-for-byte");
 assert.ok(decoded.statuses.some(status => status.includes("復元しています")));
+assert.ok(decoded.progress.length > 0, "Decoder should emit progress events");
+assert.ok(decoded.progress.every(item => item.id === 3 && Number.isFinite(item.progress)));
 
 console.log(
   "ULAC-R worker smoke test passed:",
