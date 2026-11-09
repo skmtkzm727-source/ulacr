@@ -129,6 +129,25 @@ function getCodecWorker() {
     const request = workerRequests.get(data.id);
     if (!request) return;
 
+    if (data.type === "progress") {
+      const phaseLabels = {
+        "segmentation": "音声を区間分割中",
+        "block-graph": "音声ブロックの類似性を解析中",
+        "entropy-coding": "音声データを符号化中",
+        "writing-file": "圧縮ファイルを書き出し中",
+        "header": "ファイル情報を確認中",
+        "entropy-decoding": "圧縮データを復号中",
+        "reconstruction": "音声データを復元中",
+        "done": "最終処理中"
+      };
+      const label = phaseLabels[data.phase] || "音声データを処理中";
+      const percent = Number.isFinite(data.progress)
+        ? "（" + Math.round(data.progress * 100) + "%）"
+        : "";
+      setStatus(label + percent, true);
+      return;
+    }
+
     if (data.type === "status") {
       if (data.message && data.message.includes("読み込んでいます")) {
         if (request.timeoutId) clearTimeout(request.timeoutId);
